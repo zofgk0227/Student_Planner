@@ -92,6 +92,40 @@ def display_task(task):
     print("-----------------------------------")
 
 
+def collect_tasks():
+    tasks = [get_task_input()]
+
+    while True:
+        add_another = input("Add another task? (y/n): ").strip().lower()
+        if add_another == "n":
+            return tasks
+        if add_another == "y":
+            tasks.append(get_task_input())
+        else:
+            print("Please enter y or n.")
+
+
+def create_action_plan(tasks):
+    return sorted(
+        tasks,
+        key=lambda task: (task["due_date"], -task["priority"], task["estimated_time"]),
+    )
+
+
+def display_action_plan(tasks):
+    print("\nAction Plan")
+    print("===================================")
+    for position, task in enumerate(create_action_plan(tasks), start=1):
+        print(
+            f"{position}. {task['task_name']} ({task['task_subject']}) - "
+            f"Due {task['due_date']}, Priority {task['priority']}/10, "
+            f"Estimated {task['estimated_time']} minutes"
+        )
+    print("===================================")
+
+
 if __name__ == "__main__":
-    task = get_task_input()
-    display_task(task)
+    tasks = collect_tasks()
+    for task in tasks:
+        display_task(task)
+    display_action_plan(tasks)
