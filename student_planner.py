@@ -54,6 +54,14 @@ def create_action_plan(tasks):
     )
 
 
+def task_time_spent(task):
+    return task.get("time_spent", 0)
+
+
+def task_remaining_time(task):
+    return max(0, task["estimated_time"] - task_time_spent(task))
+
+
 def escape_ical_text(value):
     return str(value).replace("\\", "\\\\").replace(";", "\\;").replace(",", "\\,").replace("\n", "\\n")
 
@@ -412,6 +420,22 @@ class StudentPlannerApp(tk.Tk):
         self.task_tree.column("due_date", width=110, anchor="center")
         self.task_tree.pack(fill="both", expand=True)
 
+        timing_frame = ttk.LabelFrame(right_panel, text="Log time for selected task", padding=10)
+        timing_frame.pack(fill="x", pady=(12, 0))
+        ttk.Label(timing_frame, text="Start (HH:MM):").grid(row=0, column=0, padx=(0, 6), sticky="w")
+        self.start_time_entry = ttk.Entry(timing_frame, width=10)
+        self.start_time_entry.grid(row=0, column=1, padx=(0, 12), sticky="w")
+        ttk.Label(timing_frame, text="End (HH:MM):").grid(row=0, column=2, padx=(0, 6), sticky="w")
+        self.end_time_entry = ttk.Entry(timing_frame, width=10)
+        self.end_time_entry.grid(row=0, column=3, padx=(0, 12), sticky="w")
+        ttk.Button(timing_frame, text="Log Time", command=self.log_task_time).grid(row=0, column=4, sticky="w")
+        self.timing_status = tk.StringVar(value="Select a task, then enter its start and end times.")
+        ttk.Label(timing_frame, textvariable=self.timing_status).grid(row=1, column=0, columnspan=5, pady=(8, 0), sticky="w")
+
+        ttk.Label(right_panel, text="Task Progress", style="Header.TLabel").pack(anchor="w", pady=(14, 10))
+        self.progress_frame = ttk.Frame(right_panel)
+        self.progress_frame.pack(fill="x")
+
         ttk.Label(right_panel, text="Action Plan", style="Header.TLabel").pack(anchor="w", pady=(14, 10))
         self.action_plan = tk.Listbox(right_panel, height=12, font=("Segoe UI", 10), bg="#ffffff")
         self.action_plan.pack(fill="both", expand=True)
@@ -473,6 +497,7 @@ class StudentPlannerApp(tk.Tk):
             "task_name": task_name,
             "task_subject": subject,
             "estimated_time": estimated_time_value,
+            "time_spent": 0,
             "priority": priority_value,
             "due_date": normalized_due_date,
         }
@@ -495,6 +520,36 @@ class StudentPlannerApp(tk.Tk):
     def open_task_calendar(self):
         TaskCalendarPopup(self, self.tasks)
 
+    def log_task_time(self):
+        selected_items = self.task_tree.selection()
+        if not selected_items:
+            messagebox.showerror("No task selected", "Select a task before logging time.")
+            return
+
+        start_text = self.start_time_entry.get().strip()
+        end_text = self.end_time_entry.get().strip()
+        try:
+            start_time = datetime.datetime.strptime(start_text, "%H:%M")
+            end_time = datetime.datetime.strptime(end_text, "%H:%M")
+        except ValueError:
+            messagebox.showerror("Invalid time", "Enter start and end times using 24-hour HH:MM format, such as 09:30.")
+            return
+
+        duration = int((end_time - start_time).total_seconds() // 60)
+        if duration <= 0:
+            messagebox.showerror("Invalid time range", "The end time must be later than the start time.")
+            return
+
+        task = self.tasks[int(selected_items[0])]
+        task["time_spent"] = task_time_spent(task) + duration
+        self.refresh_task_list()
+        self.update_action_plan()
+        self.refresh_progress_bars()
+        self.save_calendar_file()
+        self.timing_status.set(f"Logged {duration} minutes for {task['task_name']}.")
+        self.start_time_entry.delete(0, tk.END)
+        self.end_time_entry.delete(0, tk.END)
+
     def refresh_task_list(self):
         for item in self.task_tree.get_children():
             self.task_tree.delete(item)
@@ -506,11 +561,26 @@ class StudentPlannerApp(tk.Tk):
                 values=(
                     task["task_name"],
                     task["task_subject"],
-                    f"{task['estimated_time']} min",
+                    f"{task_remaining_time(task)} min left",
                     task["priority"],
                     task["due_date"],
                 ),
             )
+        self.refresh_progress_bars()
+
+    def refresh_progress_bars(self):
+        for widget in self.progress_frame.winfo_children():
+            widget.destroy()
+
+        for task in self.tasks:
+            spent = task_time_spent(task)
+            progress = min(100, spent / task["estimated_time"] * 100)
+            row = ttk.Frame(self.progress_frame)
+            row.pack(fill="x", pady=3)
+            ttk.Label(row, text=task["task_name"], width=24, anchor="w").pack(side="left")
+            progress_bar = ttk.Progressbar(row, maximum=100, value=progress)
+            progress_bar.pack(side="left", fill="x", expand=True, padx=8)
+            ttk.Label(row, text=f"{spent}/{task['estimated_time']} min").pack(side="left")
 
     def update_action_plan(self):
         self.action_plan.delete(0, tk.END)
@@ -520,7 +590,7 @@ class StudentPlannerApp(tk.Tk):
             self.action_plan.insert(
                 tk.END,
                 f"{position}. {task['task_name']} ({task['task_subject']}) - Due {task['due_date']}, "
-                f"Priority {task['priority']}/10, Estimated {task['estimated_time']} minutes",
+                f"Priority {task['priority']}/10, {task_remaining_time(task)} minutes remaining",
             )
 
     def check_email(self):
