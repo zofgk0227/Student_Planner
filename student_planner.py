@@ -3,6 +3,7 @@ import email
 import imaplib
 import re
 import tkinter as tk
+from pathlib import Path
 from tkinter import ttk, messagebox
 
 
@@ -51,6 +52,44 @@ def create_action_plan(tasks):
         tasks,
         key=lambda task: (task["due_date"], -task["priority"], task["estimated_time"]),
     )
+
+
+def escape_ical_text(value):
+    return str(value).replace("\\", "\\\\").replace(";", "\\;").replace(",", "\\,").replace("\n", "\\n")
+
+
+def create_calendar_file(tasks, file_path):
+    calendar_lines = [
+        "BEGIN:VCALENDAR",
+        "VERSION:2.0",
+        "PRODID:-//Student Planner//EN",
+        "CALSCALE:GREGORIAN",
+        "METHOD:PUBLISH",
+    ]
+
+    for task in tasks:
+        due_date = datetime.date.fromisoformat(task["due_date"])
+        event_id = f"{due_date.isoformat()}-{task['task_name']}-{task['task_subject']}"
+        description = (
+            f"Subject: {task['task_subject']}\\n"
+            f"Priority: {task['priority']}/10\\n"
+            f"Estimated time: {task['estimated_time']} minutes"
+        )
+        calendar_lines.extend(
+            [
+                "BEGIN:VEVENT",
+                f"UID:{escape_ical_text(event_id)}@student-planner",
+                f"DTSTAMP:{datetime.datetime.now(datetime.timezone.utc):%Y%m%dT%H%M%SZ}",
+                f"DTSTART;VALUE=DATE:{due_date:%Y%m%d}",
+                f"DTEND;VALUE=DATE:{due_date + datetime.timedelta(days=1):%Y%m%d}",
+                f"SUMMARY:{escape_ical_text(task['task_name'])}",
+                f"DESCRIPTION:{escape_ical_text(description)}",
+                "END:VEVENT",
+            ]
+        )
+
+    calendar_lines.append("END:VCALENDAR")
+    Path(file_path).write_text("\r\n".join(calendar_lines) + "\r\n", encoding="utf-8")
 
 
 SCHOOL_EMAIL_KEYWORDS = (
@@ -178,6 +217,88 @@ class CalendarPopup(tk.Toplevel):
         self.destroy()
 
 
+class TaskCalendarPopup(tk.Toplevel):
+    def __init__(self, parent, tasks):
+        super().__init__(parent)
+        self.title("Task Calendar")
+        self.geometry("850x650")
+        self.transient(parent)
+        self.tasks = tasks
+        today = datetime.date.today()
+        self.current_year = today.year
+        self.current_month = today.month
+
+        top_bar = ttk.Frame(self, padding=12)
+        top_bar.pack(fill="x")
+        ttk.Button(top_bar, text="<", command=self.previous_month).pack(side="left")
+        self.month_var = tk.StringVar()
+        ttk.Label(top_bar, textvariable=self.month_var, font=("Segoe UI", 14, "bold")).pack(side="left", expand=True)
+        ttk.Button(top_bar, text=">", command=self.next_month).pack(side="right")
+
+        self.calendar_grid = ttk.Frame(self, padding=(12, 0, 12, 12))
+        self.calendar_grid.pack(fill="both", expand=True)
+        for column in range(7):
+            self.calendar_grid.columnconfigure(column, weight=1)
+        for row in range(1, 7):
+            self.calendar_grid.rowconfigure(row, weight=1)
+        self.render_calendar()
+
+    def previous_month(self):
+        if self.current_month == 1:
+            self.current_month = 12
+            self.current_year -= 1
+        else:
+            self.current_month -= 1
+        self.render_calendar()
+
+    def next_month(self):
+        if self.current_month == 12:
+            self.current_month = 1
+            self.current_year += 1
+        else:
+            self.current_month += 1
+        self.render_calendar()
+
+    def render_calendar(self):
+        for widget in self.calendar_grid.winfo_children():
+            widget.destroy()
+
+        month_start = datetime.date(self.current_year, self.current_month, 1)
+        next_month = month_start.replace(day=28) + datetime.timedelta(days=4)
+        month_end = next_month - datetime.timedelta(days=next_month.day)
+        self.month_var.set(month_start.strftime("%B %Y"))
+
+        for column, weekday in enumerate(("Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat")):
+            ttk.Label(self.calendar_grid, text=weekday, anchor="center", font=("Segoe UI", 9, "bold")).grid(
+                row=0, column=column, sticky="ew", padx=2, pady=(0, 4)
+            )
+
+        tasks_by_date = {}
+        for task in self.tasks:
+            tasks_by_date.setdefault(task["due_date"], []).append(task)
+
+        first_weekday = (month_start.weekday() + 1) % 7
+        for day_number in range(1, month_end.day + 1):
+            date_value = datetime.date(self.current_year, self.current_month, day_number)
+            cell_index = first_weekday + day_number - 1
+            row, column = divmod(cell_index, 7)
+            cell = tk.Frame(self.calendar_grid, bg="#ffffff", highlightbackground="#c9d6e3", highlightthickness=1)
+            cell.grid(row=row + 1, column=column, sticky="nsew", padx=2, pady=2)
+            tk.Label(cell, text=str(day_number), bg="#ffffff", fg="#1d3557", font=("Segoe UI", 10, "bold")).pack(
+                anchor="nw", padx=6, pady=(4, 2)
+            )
+            for task in tasks_by_date.get(date_value.isoformat(), []):
+                tk.Label(
+                    cell,
+                    text=task["task_name"],
+                    bg="#d9edf7",
+                    fg="#16324f",
+                    anchor="w",
+                    justify="left",
+                    wraplength=100,
+                ).pack(fill="x", padx=4, pady=2)
+
+
 class StudentPlannerApp(tk.Tk):
     def __init__(self):
         super().__init__()
@@ -249,6 +370,7 @@ class StudentPlannerApp(tk.Tk):
         button_row.pack(fill="x", pady=(8, 0))
         ttk.Button(button_row, text="Add Task", command=self.add_task).pack(side="left", padx=(0, 10))
         ttk.Button(button_row, text="Clear", command=self.clear_form).pack(side="left")
+        ttk.Button(left_panel, text="View Task Calendar", command=self.open_task_calendar).pack(anchor="w", pady=(10, 0))
 
         ttk.Separator(left_panel, orient="horizontal").pack(fill="x", pady=18)
         ttk.Label(left_panel, text="School email", style="Header.TLabel").pack(anchor="w", pady=(0, 10))
@@ -358,7 +480,20 @@ class StudentPlannerApp(tk.Tk):
         self.tasks.append(task)
         self.refresh_task_list()
         self.update_action_plan()
+        self.save_calendar_file()
         self.clear_form()
+
+    def calendar_file_path(self):
+        return Path(__file__).resolve().parent / "student_planner_calendar.ics"
+
+    def save_calendar_file(self):
+        try:
+            create_calendar_file(self.tasks, self.calendar_file_path())
+        except OSError as exc:
+            messagebox.showerror("Calendar file error", f"Could not save the calendar file:\n{exc}")
+
+    def open_task_calendar(self):
+        TaskCalendarPopup(self, self.tasks)
 
     def refresh_task_list(self):
         for item in self.task_tree.get_children():
