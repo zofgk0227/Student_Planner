@@ -3,7 +3,6 @@ import email
 import imaplib
 import re
 import tkinter as tk
-from pathlib import Path
 from tkinter import ttk, messagebox
 
 
@@ -28,23 +27,31 @@ def normalize_due_date(raw_due_date):
 
         if len(parts) == 2:
             month, day = parts
-            return f"{current_year}-{int(month):02d}-{int(day):02d}"
-
-        if len(parts) == 3:
+            year = current_year
+        elif len(parts) == 3:
             year, month, day = parts
-            return f"{int(year):04d}-{int(month):02d}-{int(day):02d}"
+        else:
+            raise ValueError("Please enter a valid due date in YYYY-MM-DD, MM-DD, or Month Day format.")
+    else:
+        parts = raw_due_date.split()
+        if len(parts) != 2:
+            raise ValueError("Please enter a valid due date like August 15 or 08-15.")
 
-        raise ValueError("Please enter a valid due date in YYYY-MM-DD, MM-DD, or Month Day format.")
-
-    parts = raw_due_date.split()
-    if len(parts) == 2:
         month_name, day = parts
-        month_number = MONTHS.get(month_name.lower())
-        if month_number is None:
+        month = MONTHS.get(month_name.lower())
+        if month is None:
             raise ValueError("Please enter a valid month name like August.")
-        return f"{current_year}-{month_number:02d}-{int(day):02d}"
+        year = current_year
 
-    raise ValueError("Please enter a valid due date like August 15 or 08-15.")
+    try:
+        due_date = datetime.date(int(year), int(month), int(day))
+    except ValueError:
+        raise ValueError("Please enter a valid calendar date.") from None
+
+    if due_date < datetime.date.today():
+        raise ValueError("The due date cannot be before today.")
+
+    return due_date.isoformat()
 
 
 def create_action_plan(tasks):
@@ -60,44 +67,6 @@ def task_time_spent(task):
 
 def task_remaining_time(task):
     return max(0, task["estimated_time"] - task_time_spent(task))
-
-
-def escape_ical_text(value):
-    return str(value).replace("\\", "\\\\").replace(";", "\\;").replace(",", "\\,").replace("\n", "\\n")
-
-
-def create_calendar_file(tasks, file_path):
-    calendar_lines = [
-        "BEGIN:VCALENDAR",
-        "VERSION:2.0",
-        "PRODID:-//Student Planner//EN",
-        "CALSCALE:GREGORIAN",
-        "METHOD:PUBLISH",
-    ]
-
-    for task in tasks:
-        due_date = datetime.date.fromisoformat(task["due_date"])
-        event_id = f"{due_date.isoformat()}-{task['task_name']}-{task['task_subject']}"
-        description = (
-            f"Subject: {task['task_subject']}\\n"
-            f"Priority: {task['priority']}/10\\n"
-            f"Estimated time: {task['estimated_time']} minutes"
-        )
-        calendar_lines.extend(
-            [
-                "BEGIN:VEVENT",
-                f"UID:{escape_ical_text(event_id)}@student-planner",
-                f"DTSTAMP:{datetime.datetime.now(datetime.timezone.utc):%Y%m%dT%H%M%SZ}",
-                f"DTSTART;VALUE=DATE:{due_date:%Y%m%d}",
-                f"DTEND;VALUE=DATE:{due_date + datetime.timedelta(days=1):%Y%m%d}",
-                f"SUMMARY:{escape_ical_text(task['task_name'])}",
-                f"DESCRIPTION:{escape_ical_text(description)}",
-                "END:VEVENT",
-            ]
-        )
-
-    calendar_lines.append("END:VCALENDAR")
-    Path(file_path).write_text("\r\n".join(calendar_lines) + "\r\n", encoding="utf-8")
 
 
 SCHOOL_EMAIL_KEYWORDS = (
@@ -214,6 +183,7 @@ class CalendarPopup(tk.Toplevel):
                     self.days_grid,
                     text=str(day_number),
                     width=4,
+                    state="disabled" if date_value < datetime.date.today() else "normal",
                     command=lambda value=date_value: self.select_date(value),
                 )
                 button.grid(row=row, column=col, padx=2, pady=2)
@@ -407,17 +377,25 @@ class StudentPlannerApp(tk.Tk):
         right_panel.pack(side="left", fill="both", expand=True)
 
         ttk.Label(right_panel, text="Added Tasks", style="Header.TLabel").pack(anchor="w", pady=(0, 10))
-        self.task_tree = ttk.Treeview(right_panel, columns=("name", "subject", "time", "priority", "due_date"), show="headings", height=10)
+        self.task_tree = ttk.Treeview(
+            right_panel,
+            columns=("check", "name", "subject", "time", "priority", "due_date"),
+            show="headings",
+            height=10,
+        )
+        self.task_tree.heading("check", text="")
         self.task_tree.heading("name", text="Task")
         self.task_tree.heading("subject", text="Subject")
         self.task_tree.heading("time", text="Time")
         self.task_tree.heading("priority", text="Priority")
         self.task_tree.heading("due_date", text="Due Date")
+        self.task_tree.column("check", width=34, anchor="center", stretch=False)
         self.task_tree.column("name", width=180, anchor="center")
         self.task_tree.column("subject", width=140, anchor="center")
         self.task_tree.column("time", width=80, anchor="center")
         self.task_tree.column("priority", width=80, anchor="center")
         self.task_tree.column("due_date", width=110, anchor="center")
+        self.task_tree.bind("<Button-1>", self.check_off_task)
         self.task_tree.pack(fill="both", expand=True)
 
         timing_frame = ttk.LabelFrame(right_panel, text="Log time for selected task", padding=10)
@@ -505,17 +483,7 @@ class StudentPlannerApp(tk.Tk):
         self.tasks.append(task)
         self.refresh_task_list()
         self.update_action_plan()
-        self.save_calendar_file()
         self.clear_form()
-
-    def calendar_file_path(self):
-        return Path(__file__).resolve().parent / "student_planner_calendar.ics"
-
-    def save_calendar_file(self):
-        try:
-            create_calendar_file(self.tasks, self.calendar_file_path())
-        except OSError as exc:
-            messagebox.showerror("Calendar file error", f"Could not save the calendar file:\n{exc}")
 
     def open_task_calendar(self):
         TaskCalendarPopup(self, self.tasks)
@@ -545,20 +513,38 @@ class StudentPlannerApp(tk.Tk):
         self.refresh_task_list()
         self.update_action_plan()
         self.refresh_progress_bars()
-        self.save_calendar_file()
         self.timing_status.set(f"Logged {duration} minutes for {task['task_name']}.")
         self.start_time_entry.delete(0, tk.END)
         self.end_time_entry.delete(0, tk.END)
+
+    def check_off_task(self, event):
+        if self.task_tree.identify_column(event.x) != "#1":
+            return
+
+        task_id = self.task_tree.identify_row(event.y)
+        if not task_id:
+            return
+
+        task_index = int(task_id)
+        self.task_tree.set(task_id, "check", "☑")
+        self.after(150, lambda: self.remove_completed_task(task_index))
+
+    def remove_completed_task(self, task_index):
+        self.tasks.pop(task_index)
+        self.refresh_task_list()
+        self.update_action_plan()
 
     def refresh_task_list(self):
         for item in self.task_tree.get_children():
             self.task_tree.delete(item)
 
-        for task in self.tasks:
+        for task_index, task in enumerate(self.tasks):
             self.task_tree.insert(
                 "",
                 tk.END,
+                iid=str(task_index),
                 values=(
+                    "☐",
                     task["task_name"],
                     task["task_subject"],
                     f"{task_remaining_time(task)} min left",
