@@ -69,6 +69,19 @@ def task_remaining_time(task):
     return max(0, task["estimated_time"] - task_time_spent(task))
 
 
+def create_reminders(tasks, today=None):
+    today = today or datetime.date.today()
+    reminders = []
+
+    for task in tasks:
+        due_date = datetime.date.fromisoformat(task["due_date"])
+        days_until_due = (due_date - today).days
+        if days_until_due in (0, 1, 2):
+            reminders.append((days_until_due, task))
+
+    return sorted(reminders, key=lambda reminder: (reminder[0], reminder[1]["due_date"], reminder[1]["task_name"]))
+
+
 SCHOOL_EMAIL_KEYWORDS = (
     "assignment", "homework", "project", "quiz", "test", "exam",
     "reminder", "due", "grade", "class", "lesson", "school",
@@ -111,7 +124,7 @@ class CalendarPopup(tk.Toplevel):
         self.callback = callback
         self.selected_date = None
 
-        self.geometry("360x320")
+        self.geometry("440x320")
         self.transient(parent)
         self.grab_set()
 
@@ -398,6 +411,10 @@ class StudentPlannerApp(tk.Tk):
         self.task_tree.bind("<Button-1>", self.check_off_task)
         self.task_tree.pack(fill="both", expand=True)
 
+        ttk.Label(right_panel, text="Reminders", style="Header.TLabel").pack(anchor="w", pady=(14, 10))
+        self.reminders_list = tk.Listbox(right_panel, height=4, font=("Segoe UI", 10), bg="#fff8e1")
+        self.reminders_list.pack(fill="x")
+
         timing_frame = ttk.LabelFrame(right_panel, text="Log time for selected task", padding=10)
         timing_frame.pack(fill="x", pady=(12, 0))
         ttk.Label(timing_frame, text="Start (HH:MM):").grid(row=0, column=0, padx=(0, 6), sticky="w")
@@ -553,6 +570,22 @@ class StudentPlannerApp(tk.Tk):
                 ),
             )
         self.refresh_progress_bars()
+        self.refresh_reminders()
+
+    def refresh_reminders(self):
+        self.reminders_list.delete(0, tk.END)
+        reminders = create_reminders(self.tasks)
+
+        if not reminders:
+            self.reminders_list.insert(tk.END, "No assignments due today or in the next 2 days.")
+            return
+
+        for days_until_due, task in reminders:
+            day_label = {0: "today", 1: "tomorrow", 2: "in 2 days"}[days_until_due]
+            self.reminders_list.insert(
+                tk.END,
+                f"Due {day_label}: {task['task_name']} ({task['task_subject']}) - {task_remaining_time(task)} minutes remaining",
+            )
 
     def refresh_progress_bars(self):
         for widget in self.progress_frame.winfo_children():
