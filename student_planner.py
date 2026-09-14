@@ -547,6 +547,7 @@ class StudentPlannerApp(tk.Tk):
         self.after(150, lambda: self.remove_completed_task(task_index))
 
     def remove_completed_task(self, task_index):
+        self.tasks[task_index]["time_spent"] = 0
         self.tasks.pop(task_index)
         self.refresh_task_list()
         self.update_action_plan()
