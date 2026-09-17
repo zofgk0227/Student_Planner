@@ -54,9 +54,19 @@ def normalize_due_date(raw_due_date):
     return due_date.isoformat()
 
 
+def task_due_status(task, today=None):
+    if task.get("status") == "done":
+        return "done"
+
+    today = today or datetime.date.today()
+    due_date = datetime.date.fromisoformat(task["due_date"])
+    return "overdue" if due_date < today else "due"
+
+
 def create_action_plan(tasks):
+    active_tasks = [task for task in tasks if task.get("status") != "done"]
     return sorted(
-        tasks,
+        active_tasks,
         key=lambda task: (task["due_date"], -task["priority"], task["estimated_time"]),
     )
 
@@ -66,6 +76,8 @@ def task_time_spent(task):
 
 
 def task_remaining_time(task):
+    if task.get("status") == "done":
+        return 0
     return max(0, task["estimated_time"] - task_time_spent(task))
 
 
@@ -74,6 +86,9 @@ def create_reminders(tasks, today=None):
     reminders = []
 
     for task in tasks:
+        if task.get("status") == "done":
+            continue
+
         due_date = datetime.date.fromisoformat(task["due_date"])
         days_until_due = (due_date - today).days
         if days_until_due in (0, 1, 2):
@@ -390,24 +405,42 @@ class StudentPlannerApp(tk.Tk):
         right_panel.pack(side="left", fill="both", expand=True)
 
         ttk.Label(right_panel, text="Added Tasks", style="Header.TLabel").pack(anchor="w", pady=(0, 10))
+        self.current_task_category = "due"
+        self.category_frame = ttk.Frame(right_panel)
+        self.category_frame.pack(fill="x", pady=(0, 10))
+        self.category_buttons = {}
+        for category_key, category_label in (("due", "Due"), ("overdue", "Overdue"), ("done", "Done")):
+            button = ttk.Button(
+                self.category_frame,
+                text=category_label,
+                command=lambda key=category_key: self.set_task_category(key),
+            )
+            button.pack(side="left", padx=(0, 8))
+            self.category_buttons[category_key] = button
+
         self.task_tree = ttk.Treeview(
             right_panel,
-            columns=("check", "name", "subject", "time", "priority", "due_date"),
+            columns=("check", "status", "name", "subject", "time", "priority", "due_date"),
             show="headings",
             height=10,
         )
         self.task_tree.heading("check", text="")
+        self.task_tree.heading("status", text="Status")
         self.task_tree.heading("name", text="Task")
         self.task_tree.heading("subject", text="Subject")
         self.task_tree.heading("time", text="Time")
         self.task_tree.heading("priority", text="Priority")
         self.task_tree.heading("due_date", text="Due Date")
         self.task_tree.column("check", width=34, anchor="center", stretch=False)
+        self.task_tree.column("status", width=90, anchor="center")
         self.task_tree.column("name", width=180, anchor="center")
         self.task_tree.column("subject", width=140, anchor="center")
-        self.task_tree.column("time", width=80, anchor="center")
+        self.task_tree.column("time", width=100, anchor="center")
         self.task_tree.column("priority", width=80, anchor="center")
         self.task_tree.column("due_date", width=110, anchor="center")
+        self.task_tree.tag_configure("due", background="#eaf7ea", foreground="#1d3557")
+        self.task_tree.tag_configure("overdue", background="#fdecea", foreground="#7a1d1d")
+        self.task_tree.tag_configure("done", background="#edf3ff", foreground="#2f4154")
         self.task_tree.bind("<Button-1>", self.check_off_task)
         self.task_tree.pack(fill="both", expand=True)
 
@@ -495,6 +528,7 @@ class StudentPlannerApp(tk.Tk):
             "time_spent": 0,
             "priority": priority_value,
             "due_date": normalized_due_date,
+            "status": "due",
         }
 
         self.tasks.append(task)
@@ -504,6 +538,12 @@ class StudentPlannerApp(tk.Tk):
 
     def open_task_calendar(self):
         TaskCalendarPopup(self, self.tasks)
+
+    def set_task_category(self, category):
+        self.current_task_category = category
+        for key, button in self.category_buttons.items():
+            button.configure(style="TButton" if key != category else "Accent.TButton")
+        self.refresh_task_list()
 
     def log_task_time(self):
         selected_items = self.task_tree.selection()
@@ -520,12 +560,17 @@ class StudentPlannerApp(tk.Tk):
             messagebox.showerror("Invalid time", "Enter start and end times using 24-hour HH:MM format, such as 09:30.")
             return
 
+        task_index = self.task_row_lookup.get(selected_items[0])
+        if task_index is None:
+            messagebox.showerror("Task not found", "That task could not be found in the current list.")
+            return
+
+        task = self.tasks[task_index]
         duration = int((end_time - start_time).total_seconds() // 60)
         if duration <= 0:
             messagebox.showerror("Invalid time range", "The end time must be later than the start time.")
             return
 
-        task = self.tasks[int(selected_items[0])]
         task["time_spent"] = task_time_spent(task) + duration
         self.refresh_task_list()
         self.update_action_plan()
@@ -542,13 +587,17 @@ class StudentPlannerApp(tk.Tk):
         if not task_id:
             return
 
-        task_index = int(task_id)
+        task_index = self.task_row_lookup.get(task_id)
+        if task_index is None:
+            return
+
         self.task_tree.set(task_id, "check", "☑")
         self.after(150, lambda: self.remove_completed_task(task_index))
 
     def remove_completed_task(self, task_index):
-        self.tasks[task_index]["time_spent"] = 0
-        self.tasks.pop(task_index)
+        task = self.tasks[task_index]
+        task["status"] = "done"
+        task["time_spent"] = task["estimated_time"]
         self.refresh_task_list()
         self.update_action_plan()
 
@@ -556,20 +605,39 @@ class StudentPlannerApp(tk.Tk):
         for item in self.task_tree.get_children():
             self.task_tree.delete(item)
 
+        self.task_row_lookup = {}
+        for task in self.tasks:
+            task["status"] = task_due_status(task)
+
+        visible_tasks = [
+            task for task in self.tasks if task["status"] == self.current_task_category
+        ]
+        visible_tasks.sort(key=lambda task: (task["due_date"], -task["priority"], task["task_name"]))
+
+        self.task_tree.heading("status", text=self.current_task_category.title())
         for task_index, task in enumerate(self.tasks):
+            if task["status"] != self.current_task_category:
+                continue
+
+            row_id = f"task_{task_index}"
+            self.task_row_lookup[row_id] = task_index
+            status_label = {"due": "Due", "overdue": "Overdue", "done": "Done"}[task["status"]]
             self.task_tree.insert(
                 "",
                 tk.END,
-                iid=str(task_index),
+                iid=row_id,
                 values=(
-                    "☐",
+                    "☐" if task["status"] != "done" else "☑",
+                    status_label,
                     task["task_name"],
                     task["task_subject"],
-                    f"{task_remaining_time(task)} min left",
+                    f"{task_remaining_time(task)} min left" if task["status"] != "done" else "Completed",
                     task["priority"],
                     task["due_date"],
                 ),
+                tags=(task["status"],),
             )
+            self.task_tree.item(row_id, tags=(task["status"],))
         self.refresh_progress_bars()
         self.refresh_reminders()
 
