@@ -81,6 +81,19 @@ def task_remaining_time(task):
     return max(0, task["estimated_time"] - task_time_spent(task))
 
 
+def set_daily_work_target(task, minutes):
+    try:
+        minutes = int(minutes)
+    except (TypeError, ValueError):
+        raise ValueError("Daily work target must be a whole number of minutes.") from None
+
+    if minutes <= 0:
+        raise ValueError("Daily work target must be greater than zero.")
+
+    task["daily_work_target"] = minutes
+    return task
+
+
 def create_reminders(tasks, today=None):
     today = today or datetime.date.today()
     reminders = []
@@ -358,6 +371,17 @@ class StudentPlannerApp(tk.Tk):
         self.time_dropdown = ttk.Combobox(left_panel, textvariable=self.time_var, values=time_values, state="readonly", width=35)
         self.time_dropdown.pack(fill="x", pady=(0, 10))
 
+        ttk.Label(left_panel, text="Daily work target (minutes):", style="Section.TLabel").pack(anchor="w")
+        self.daily_work_var = tk.StringVar(value=time_values[1])
+        self.daily_work_dropdown = ttk.Combobox(
+            left_panel,
+            textvariable=self.daily_work_var,
+            values=time_values,
+            state="readonly",
+            width=35,
+        )
+        self.daily_work_dropdown.pack(fill="x", pady=(0, 10))
+
         ttk.Label(left_panel, text="Priority (1-10):", style="Section.TLabel").pack(anchor="w")
         priority_values = [str(value) for value in range(1, 11)]
         self.priority_var = tk.StringVar(value="5")
@@ -490,6 +514,7 @@ class StudentPlannerApp(tk.Tk):
         self.task_name_entry.delete(0, tk.END)
         self.subject_entry.delete(0, tk.END)
         self.time_var.set("30")
+        self.daily_work_var.set("30")
         self.priority_var.set("5")
         self.due_date_var.set("")
 
@@ -497,6 +522,7 @@ class StudentPlannerApp(tk.Tk):
         task_name = self.task_name_entry.get().strip()
         subject = self.subject_entry.get().strip()
         estimated_time = self.time_var.get().strip()
+        daily_work_target = self.daily_work_var.get().strip()
         priority = self.priority_var.get().strip()
         due_date = self.due_date_var.get().strip()
 
@@ -511,10 +537,13 @@ class StudentPlannerApp(tk.Tk):
         try:
             normalized_due_date = normalize_due_date(due_date)
             estimated_time_value = int(estimated_time)
+            daily_work_target_value = int(daily_work_target)
             priority_value = int(priority)
 
             if estimated_time_value <= 0:
                 raise ValueError("Estimated time must be greater than zero.")
+            if daily_work_target_value <= 0:
+                raise ValueError("Daily work target must be greater than zero.")
             if not 1 <= priority_value <= 10:
                 raise ValueError("Priority must be between 1 and 10.")
         except ValueError as exc:
@@ -525,6 +554,7 @@ class StudentPlannerApp(tk.Tk):
             "task_name": task_name,
             "task_subject": subject,
             "estimated_time": estimated_time_value,
+            "daily_work_target": daily_work_target_value,
             "time_spent": 0,
             "priority": priority_value,
             "due_date": normalized_due_date,
