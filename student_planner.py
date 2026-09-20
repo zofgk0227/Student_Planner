@@ -71,6 +71,108 @@ def create_action_plan(tasks):
     )
 
 
+def daily_task_score(task, today=None):
+    today = today or datetime.date.today()
+    due_date = datetime.date.fromisoformat(task["due_date"])
+    days_until_due = max(0, (due_date - today).days)
+    remaining_time = task_remaining_time(task)
+    target = max(15, min(task.get("daily_work_target", 30), remaining_time))
+
+    urgency_bonus = 0
+    if task.get("status") == "overdue":
+        urgency_bonus += 40
+    elif days_until_due == 0:
+        urgency_bonus += 30
+    elif days_until_due == 1:
+        urgency_bonus += 22
+    elif days_until_due <= 3:
+        urgency_bonus += 12
+
+    priority_score = int(task.get("priority", 1)) * 10
+    difficulty_score = max(0, remaining_time - target) * 0.1
+    return priority_score + urgency_bonus + difficulty_score
+
+
+def create_daily_plan(tasks, day_minutes=None, today=None):
+    today = today or datetime.date.today()
+    active_tasks = [task for task in tasks if task.get("status") != "done"]
+    if not active_tasks:
+        return []
+
+    if day_minutes is None:
+        day_minutes = sum(max(15, min(task.get("daily_work_target", 30), task_remaining_time(task))) for task in active_tasks)
+
+    day_minutes = max(0, int(day_minutes))
+    if day_minutes == 0:
+        return []
+
+    scored_tasks = []
+    for task in active_tasks:
+        remaining_time = task_remaining_time(task)
+        if remaining_time <= 0:
+            continue
+
+        target = max(15, min(task.get("daily_work_target", 30), remaining_time))
+        score = daily_task_score(task, today)
+        scored_tasks.append({
+            "task": task,
+            "remaining_time": remaining_time,
+            "daily_target": target,
+            "score": max(score, 1),
+            "planned_minutes": 0,
+        })
+
+    if not scored_tasks:
+        return []
+
+    total_score = sum(item["score"] for item in scored_tasks)
+    remaining_budget = day_minutes
+    for task_plan in sorted(scored_tasks, key=lambda item: (-item["score"], item["task"]["due_date"], -item["task"]["priority"])):
+        if remaining_budget <= 0:
+            break
+
+        base_share = (task_plan["score"] / total_score) * day_minutes if total_score else day_minutes / len(scored_tasks)
+        suggested_minutes = min(task_plan["daily_target"], task_plan["remaining_time"], max(15, int(round(base_share))))
+        planned_minutes = min(max(0, suggested_minutes), remaining_budget)
+
+        if planned_minutes == 0 and remaining_budget >= 15 and task_plan["score"] == max(item["score"] for item in scored_tasks):
+            planned_minutes = min(15, remaining_budget, task_plan["daily_target"], task_plan["remaining_time"])
+
+        task_plan["planned_minutes"] = planned_minutes
+        remaining_budget -= planned_minutes
+
+    if remaining_budget > 0:
+        for task_plan in sorted(scored_tasks, key=lambda item: (-item["score"], item["task"]["due_date"], -item["task"]["priority"])):
+            if remaining_budget <= 0:
+                break
+            capacity = min(task_plan["daily_target"], task_plan["remaining_time"]) - task_plan["planned_minutes"]
+            if capacity <= 0:
+                continue
+            extra_minutes = min(capacity, remaining_budget)
+            task_plan["planned_minutes"] += extra_minutes
+            remaining_budget -= extra_minutes
+
+    plan = []
+    for task_plan in sorted(scored_tasks, key=lambda item: (-item["score"], item["task"]["due_date"], -item["task"]["priority"])):
+        task = task_plan["task"]
+        planned_minutes = task_plan["planned_minutes"]
+        if planned_minutes <= 0:
+            continue
+        plan.append({
+            "task_name": task["task_name"],
+            "task_subject": task["task_subject"],
+            "priority": task["priority"],
+            "estimated_time": task["estimated_time"],
+            "daily_work_target": task.get("daily_work_target", 30),
+            "due_date": task["due_date"],
+            "planned_minutes": planned_minutes,
+            "remaining_time": task_remaining_time(task),
+            "score": task_plan["score"],
+        })
+
+    return plan
+
+
 def task_time_spent(task):
     return task.get("time_spent", 0)
 
@@ -388,6 +490,18 @@ class StudentPlannerApp(tk.Tk):
         self.priority_dropdown = ttk.Combobox(left_panel, textvariable=self.priority_var, values=priority_values, state="readonly", width=35)
         self.priority_dropdown.pack(fill="x", pady=(0, 10))
 
+        ttk.Label(left_panel, text="Daily study budget (minutes):", style="Section.TLabel").pack(anchor="w")
+        daily_budget_values = ["30", "45", "60", "90", "120", "150", "180", "240", "300"]
+        self.daily_budget_var = tk.StringVar(value="120")
+        self.daily_budget_dropdown = ttk.Combobox(
+            left_panel,
+            textvariable=self.daily_budget_var,
+            values=daily_budget_values,
+            state="readonly",
+            width=35,
+        )
+        self.daily_budget_dropdown.pack(fill="x", pady=(0, 10))
+
         ttk.Label(left_panel, text="Due date:", style="Section.TLabel").pack(anchor="w")
         date_frame = ttk.Frame(left_panel)
         date_frame.pack(fill="x", pady=(0, 12))
@@ -702,13 +816,31 @@ class StudentPlannerApp(tk.Tk):
 
     def update_action_plan(self):
         self.action_plan.delete(0, tk.END)
-        sorted_tasks = create_action_plan(self.tasks)
+        try:
+            daily_budget = int(self.daily_budget_var.get())
+            if daily_budget <= 0:
+                raise ValueError
+        except (TypeError, ValueError):
+            daily_budget = 120
+            self.daily_budget_var.set("120")
 
-        for position, task in enumerate(sorted_tasks, start=1):
+        day_plan = create_daily_plan(self.tasks, day_minutes=daily_budget)
+        if not day_plan:
+            self.action_plan.insert(tk.END, "No active tasks to schedule for today.")
+            return
+
+        for position, task_plan in enumerate(day_plan, start=1):
+            task_name = task_plan["task_name"]
+            subject = task_plan["task_subject"]
+            priority = task_plan["priority"]
+            planned = task_plan["planned_minutes"]
+            due_date = task_plan["due_date"]
+            remaining = task_plan["remaining_time"]
             self.action_plan.insert(
                 tk.END,
-                f"{position}. {task['task_name']} ({task['task_subject']}) - Due {task['due_date']}, "
-                f"Priority {task['priority']}/10, {task_remaining_time(task)} minutes remaining",
+                f"{position}. {task_name} ({subject}) - {planned} min planned today, "
+                f"Priority {priority}/10, total {task_plan['estimated_time']} min, "
+                f"{remaining} min left, due {due_date}",
             )
 
     def check_email(self):
