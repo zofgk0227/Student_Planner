@@ -437,7 +437,14 @@ class StudentPlannerApp(tk.Tk):
         self.style.configure("TEntry", padding=6)
         self.style.configure("TButton", padding=(10, 6))
 
-        page_canvas = tk.Canvas(self, highlightthickness=0, background="#eef5ff")
+        self.notebook = ttk.Notebook(self)
+        self.notebook.pack(fill="both", expand=True)
+        overview_tab = ttk.Frame(self.notebook)
+        self.schedule_tab = ttk.Frame(self.notebook, padding=16)
+        self.notebook.add(overview_tab, text="Overview")
+        self.notebook.add(self.schedule_tab, text="Schedule")
+
+        page_canvas = tk.Canvas(overview_tab, highlightthickness=0, background="#eef5ff")
         page_scrollbar = ttk.Scrollbar(self, orient="vertical", command=page_canvas.yview)
         page_canvas.configure(yscrollcommand=page_scrollbar.set)
         page_scrollbar.pack(side="right", fill="y")
@@ -618,6 +625,9 @@ class StudentPlannerApp(tk.Tk):
         self.email_tree.column("preview", width=260, anchor="w")
         self.email_tree.pack(fill="both", expand=True)
 
+        self.build_schedule_tab()
+        self.refresh_schedule()
+
     def open_calendar(self):
         CalendarPopup(self, self.set_due_date)
 
@@ -678,10 +688,150 @@ class StudentPlannerApp(tk.Tk):
         self.tasks.append(task)
         self.refresh_task_list()
         self.update_action_plan()
+        self.refresh_schedule()
         self.clear_form()
 
     def open_task_calendar(self):
         TaskCalendarPopup(self, self.tasks)
+
+    def build_schedule_tab(self):
+        header = ttk.Frame(self.schedule_tab)
+        header.pack(fill="x", pady=(0, 12))
+        ttk.Label(header, text="Schedule", style="Header.TLabel").pack(side="left")
+        ttk.Button(header, text="Today", command=self.show_schedule_today).pack(side="right")
+        ttk.Button(header, text="<", command=self.previous_schedule_month).pack(side="right", padx=(0, 6))
+        self.schedule_month_var = tk.StringVar()
+        ttk.Label(header, textvariable=self.schedule_month_var, font=("Segoe UI", 13, "bold")).pack(
+            side="right", padx=12
+        )
+        ttk.Button(header, text=">", command=self.next_schedule_month).pack(side="right", padx=(6, 0))
+
+        self.schedule_calendar = ttk.Frame(self.schedule_tab)
+        self.schedule_calendar.pack(fill="both", expand=True)
+        for column in range(7):
+            self.schedule_calendar.columnconfigure(column, weight=1)
+        for row in range(1, 7):
+            self.schedule_calendar.rowconfigure(row, weight=1)
+
+        plan_frame = ttk.LabelFrame(self.schedule_tab, text="Selected day plan", padding=10)
+        plan_frame.pack(fill="x", pady=(12, 0))
+        self.schedule_selected_day_var = tk.StringVar()
+        ttk.Label(plan_frame, textvariable=self.schedule_selected_day_var, style="Section.TLabel").pack(anchor="w")
+        self.schedule_plan_list = tk.Listbox(plan_frame, height=4, font=("Segoe UI", 10), bg="#ffffff")
+        self.schedule_plan_list.pack(fill="x", pady=(6, 0))
+
+        today = datetime.date.today()
+        self.schedule_year = today.year
+        self.schedule_month = today.month
+        self.schedule_selected_date = today
+
+    def previous_schedule_month(self):
+        if self.schedule_month == 1:
+            self.schedule_month = 12
+            self.schedule_year -= 1
+        else:
+            self.schedule_month -= 1
+        self.refresh_schedule()
+
+    def next_schedule_month(self):
+        if self.schedule_month == 12:
+            self.schedule_month = 1
+            self.schedule_year += 1
+        else:
+            self.schedule_month += 1
+        self.refresh_schedule()
+
+    def show_schedule_today(self):
+        today = datetime.date.today()
+        self.schedule_year = today.year
+        self.schedule_month = today.month
+        self.schedule_selected_date = today
+        self.refresh_schedule()
+
+    def select_schedule_date(self, selected_date):
+        self.schedule_selected_date = selected_date
+        self.refresh_schedule()
+
+    def refresh_schedule(self):
+        if not hasattr(self, "schedule_calendar"):
+            return
+
+        for widget in self.schedule_calendar.winfo_children():
+            widget.destroy()
+
+        month_start = datetime.date(self.schedule_year, self.schedule_month, 1)
+        next_month = month_start.replace(day=28) + datetime.timedelta(days=4)
+        month_end = next_month - datetime.timedelta(days=next_month.day)
+        self.schedule_month_var.set(month_start.strftime("%B %Y"))
+
+        for column, weekday in enumerate(("Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat")):
+            ttk.Label(self.schedule_calendar, text=weekday, anchor="center", font=("Segoe UI", 9, "bold")).grid(
+                row=0, column=column, sticky="ew", padx=2, pady=(0, 4)
+            )
+
+        tasks_by_date = {}
+        for task in self.tasks:
+            tasks_by_date.setdefault(task["due_date"], []).append(task)
+
+        first_weekday = (month_start.weekday() + 1) % 7
+        for day_number in range(1, month_end.day + 1):
+            date_value = datetime.date(self.schedule_year, self.schedule_month, day_number)
+            cell_index = first_weekday + day_number - 1
+            row, column = divmod(cell_index, 7)
+            is_selected = date_value == self.schedule_selected_date
+            cell = tk.Frame(
+                self.schedule_calendar,
+                bg="#e7f1ff" if is_selected else "#ffffff",
+                highlightbackground="#3d78b8" if is_selected else "#c9d6e3",
+                highlightthickness=2 if is_selected else 1,
+            )
+            cell.grid(row=row + 1, column=column, sticky="nsew", padx=2, pady=2)
+            day_button = tk.Button(
+                cell,
+                text=str(day_number),
+                command=lambda value=date_value: self.select_schedule_date(value),
+                relief="flat",
+                bg="#e7f1ff" if is_selected else "#ffffff",
+                fg="#1d3557",
+                font=("Segoe UI", 10, "bold"),
+                anchor="w",
+            )
+            day_button.pack(fill="x", padx=3, pady=(2, 0))
+
+            for task in tasks_by_date.get(date_value.isoformat(), []):
+                status_prefix = "Done: " if task.get("status") == "done" else "Task: "
+                tk.Label(
+                    cell,
+                    text=f"{status_prefix}{task['task_name']}",
+                    bg="#d9edf7" if task.get("status") != "done" else "#e5e7eb",
+                    fg="#16324f",
+                    anchor="w",
+                    justify="left",
+                    wraplength=130,
+                ).pack(fill="x", padx=4, pady=2)
+
+        self.refresh_selected_schedule_plan()
+
+    def refresh_selected_schedule_plan(self):
+        selected_date = self.schedule_selected_date
+        self.schedule_selected_day_var.set(selected_date.strftime("%A, %B %d, %Y"))
+        self.schedule_plan_list.delete(0, tk.END)
+        try:
+            daily_budget = int(self.daily_budget_var.get())
+        except (TypeError, ValueError):
+            daily_budget = 120
+
+        day_plan = create_daily_plan(self.tasks, day_minutes=daily_budget, today=selected_date)
+        if not day_plan:
+            self.schedule_plan_list.insert(tk.END, "No active study tasks planned for this day.")
+            return
+
+        for task_plan in day_plan:
+            self.schedule_plan_list.insert(
+                tk.END,
+                f"{task_plan['task_name']} ({task_plan['task_subject']}) - "
+                f"{task_plan['planned_minutes']} min, due {task_plan['due_date']}",
+            )
 
     def set_task_category(self, category):
         self.current_task_category = category
