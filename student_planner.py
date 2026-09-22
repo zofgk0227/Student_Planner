@@ -698,13 +698,16 @@ class StudentPlannerApp(tk.Tk):
         header = ttk.Frame(self.schedule_tab)
         header.pack(fill="x", pady=(0, 12))
         ttk.Label(header, text="Schedule", style="Header.TLabel").pack(side="left")
-        ttk.Button(header, text="Today", command=self.show_schedule_today).pack(side="right")
-        ttk.Button(header, text="<", command=self.previous_schedule_month).pack(side="right", padx=(0, 6))
+
+        nav_frame = ttk.Frame(header)
+        nav_frame.pack(side="right")
+        ttk.Button(nav_frame, text="Today", command=self.show_schedule_today).pack(side="right")
+        ttk.Button(nav_frame, text=">", command=self.next_schedule_month).pack(side="right", padx=(6, 0))
         self.schedule_month_var = tk.StringVar()
-        ttk.Label(header, textvariable=self.schedule_month_var, font=("Segoe UI", 13, "bold")).pack(
+        ttk.Label(nav_frame, textvariable=self.schedule_month_var, font=("Segoe UI", 13, "bold")).pack(
             side="right", padx=12
         )
-        ttk.Button(header, text=">", command=self.next_schedule_month).pack(side="right", padx=(6, 0))
+        ttk.Button(nav_frame, text="<", command=self.previous_schedule_month).pack(side="right", padx=(0, 6))
 
         self.schedule_calendar = ttk.Frame(self.schedule_tab)
         self.schedule_calendar.pack(fill="both", expand=True)
