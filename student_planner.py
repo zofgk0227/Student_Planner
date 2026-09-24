@@ -2,6 +2,7 @@ import datetime
 import email
 import imaplib
 import json
+import argparse
 from pathlib import Path
 import re
 import tkinter as tk
@@ -212,6 +213,42 @@ def create_reminders(tasks, today=None):
             reminders.append((days_until_due, task))
 
     return sorted(reminders, key=lambda reminder: (reminder[0], reminder[1]["due_date"], reminder[1]["task_name"]))
+
+
+def set_task_time(tasks_file, task_name, minutes):
+    try:
+        minutes = int(minutes)
+    except (TypeError, ValueError):
+        raise ValueError("Time must be a whole number of minutes.") from None
+
+    if minutes <= 0:
+        raise ValueError("Time must be greater than zero.")
+
+    try:
+        with tasks_file.open("r", encoding="utf-8") as saved_tasks_file:
+            tasks = json.load(saved_tasks_file)
+    except FileNotFoundError:
+        raise ValueError("The saved task file does not exist.") from None
+    except (OSError, json.JSONDecodeError):
+        raise ValueError("The saved task file could not be read.") from None
+
+    if not isinstance(tasks, list):
+        raise ValueError("The saved task file does not contain a valid task list.")
+
+    matches = [task for task in tasks if isinstance(task, dict) and task.get("task_name") == task_name]
+    if not matches:
+        raise ValueError(f'No task named "{task_name}" was found.')
+    if len(matches) > 1:
+        raise ValueError(f'More than one task is named "{task_name}". Rename tasks in the JSON file first.')
+
+    matches[0]["estimated_time"] = minutes
+    temporary_file = tasks_file.with_suffix(".tmp")
+    try:
+        with temporary_file.open("w", encoding="utf-8") as saved_tasks_file:
+            json.dump(tasks, saved_tasks_file, indent=2)
+        temporary_file.replace(tasks_file)
+    except OSError as exc:
+        raise ValueError(f"The task changes could not be saved: {exc}") from None
 
 
 SCHOOL_EMAIL_KEYWORDS = (
@@ -1098,6 +1135,26 @@ class StudentPlannerApp(tk.Tk):
         self.email_status.set(f"Found {len(updates)} school update(s).")
 
 
+def parse_arguments():
+    parser = argparse.ArgumentParser(description="Student Planner")
+    parser.add_argument(
+        "--set-time",
+        nargs=2,
+        metavar=("TASK_NAME", "MINUTES"),
+        help="change a task's estimated time without opening the planner",
+    )
+    return parser.parse_args()
+
+
 if __name__ == "__main__":
-    app = StudentPlannerApp()
-    app.mainloop()
+    arguments = parse_arguments()
+    if arguments.set_time:
+        task_name, minutes = arguments.set_time
+        try:
+            set_task_time(Path(__file__).with_name("student_planner_tasks.json"), task_name, minutes)
+        except ValueError as exc:
+            raise SystemExit(str(exc))
+        print(f'Updated "{task_name}" to {int(minutes)} minutes.')
+    else:
+        app = StudentPlannerApp()
+        app.mainloop()
