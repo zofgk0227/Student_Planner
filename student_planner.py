@@ -1,6 +1,8 @@
 import datetime
 import email
 import imaplib
+import json
+from pathlib import Path
 import re
 import tkinter as tk
 from tkinter import ttk, messagebox
@@ -428,7 +430,9 @@ class StudentPlannerApp(tk.Tk):
         self.minsize(1050, 720)
         self.configure(bg="#eef5ff")
 
-        self.tasks = []
+        self.tasks_file = Path(__file__).with_name("student_planner_tasks.json")
+        self.tasks = self.load_tasks()
+        self.protocol("WM_DELETE_WINDOW", self.close_app)
 
         self.style = ttk.Style(self)
         self.style.theme_use("clam")
@@ -626,7 +630,41 @@ class StudentPlannerApp(tk.Tk):
         self.email_tree.pack(fill="both", expand=True)
 
         self.build_schedule_tab()
+        self.refresh_task_list()
+        self.update_action_plan()
+        self.refresh_progress_bars()
         self.refresh_schedule()
+
+    def load_tasks(self):
+        if not self.tasks_file.exists():
+            return []
+
+        try:
+            with self.tasks_file.open("r", encoding="utf-8") as tasks_file:
+                saved_tasks = json.load(tasks_file)
+        except (OSError, json.JSONDecodeError):
+            messagebox.showwarning(
+                "Saved tasks unavailable",
+                "The saved task file could not be read. Starting with an empty task list.",
+            )
+            return []
+
+        if not isinstance(saved_tasks, list):
+            return []
+        return [task for task in saved_tasks if isinstance(task, dict)]
+
+    def save_tasks(self):
+        temporary_file = self.tasks_file.with_suffix(".tmp")
+        try:
+            with temporary_file.open("w", encoding="utf-8") as tasks_file:
+                json.dump(self.tasks, tasks_file, indent=2)
+            temporary_file.replace(self.tasks_file)
+        except OSError as exc:
+            messagebox.showerror("Could not save tasks", f"Your task changes could not be saved:\n{exc}")
+
+    def close_app(self):
+        self.save_tasks()
+        self.destroy()
 
     def open_calendar(self):
         CalendarPopup(self, self.set_due_date)
@@ -686,6 +724,7 @@ class StudentPlannerApp(tk.Tk):
         }
 
         self.tasks.append(task)
+        self.save_tasks()
         self.refresh_task_list()
         self.update_action_plan()
         self.refresh_schedule()
@@ -869,6 +908,7 @@ class StudentPlannerApp(tk.Tk):
             return
 
         task["time_spent"] = task_time_spent(task) + duration
+        self.save_tasks()
         self.refresh_task_list()
         self.update_action_plan()
         self.refresh_progress_bars()
@@ -895,6 +935,7 @@ class StudentPlannerApp(tk.Tk):
         task = self.tasks[task_index]
         task["status"] = "done"
         task["time_spent"] = task["estimated_time"]
+        self.save_tasks()
         self.refresh_task_list()
         self.update_action_plan()
 
