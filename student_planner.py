@@ -14,13 +14,19 @@ MONTHS = {
     "july": 7, "august": 8, "september": 9, "october": 10, "november": 11, "december": 12,
 }
 
+FIXED_TODAY = datetime.date(2026, 9, 26)
+
+
+def get_today():
+    return FIXED_TODAY
+
 
 def normalize_due_date(raw_due_date):
     if raw_due_date is None:
         raise ValueError("Please enter a due date.")
 
     raw_due_date = str(raw_due_date).strip()
-    current_year = datetime.date.today().year
+    current_year = get_today().year
 
     if not raw_due_date:
         raise ValueError("Please enter a due date.")
@@ -51,7 +57,7 @@ def normalize_due_date(raw_due_date):
     except ValueError:
         raise ValueError("Please enter a valid calendar date.") from None
 
-    if due_date < datetime.date.today():
+    if due_date < get_today():
         raise ValueError("The due date cannot be before today.")
 
     return due_date.isoformat()
@@ -61,7 +67,7 @@ def task_due_status(task, today=None):
     if task.get("status") == "done":
         return "done"
 
-    today = today or datetime.date.today()
+    today = today or get_today()
     due_date = datetime.date.fromisoformat(task["due_date"])
     return "overdue" if due_date < today else "due"
 
@@ -75,7 +81,7 @@ def create_action_plan(tasks):
 
 
 def daily_task_score(task, today=None):
-    today = today or datetime.date.today()
+    today = today or get_today()
     due_date = datetime.date.fromisoformat(task["due_date"])
     days_until_due = max(0, (due_date - today).days)
     remaining_time = task_remaining_time(task)
@@ -97,7 +103,7 @@ def daily_task_score(task, today=None):
 
 
 def create_daily_plan(tasks, day_minutes=None, today=None):
-    today = today or datetime.date.today()
+    today = today or get_today()
     active_tasks = [task for task in tasks if task.get("status") != "done"]
     if not active_tasks:
         return []
@@ -200,7 +206,7 @@ def set_daily_work_target(task, minutes):
 
 
 def create_reminders(tasks, today=None):
-    today = today or datetime.date.today()
+    today = today or get_today()
     reminders = []
 
     for task in tasks:
@@ -297,8 +303,8 @@ class CalendarPopup(tk.Toplevel):
         self.transient(parent)
         self.grab_set()
 
-        self.current_year = datetime.date.today().year
-        self.current_month = datetime.date.today().month
+        self.current_year = get_today().year
+        self.current_month = get_today().month
 
         top_bar = ttk.Frame(self, padding=(10, 10, 10, 0))
         top_bar.pack(fill="x")
@@ -350,7 +356,7 @@ class CalendarPopup(tk.Toplevel):
 
         first_day = datetime.date(self.current_year, self.current_month, 1)
         last_day = datetime.date(self.current_year, self.current_month + 1, 1) - datetime.timedelta(days=1) if self.current_month < 12 else datetime.date(self.current_year + 1, 1, 1) - datetime.timedelta(days=1)
-        first_weekday = first_day.weekday()
+        first_weekday = (first_day.weekday() + 1) % 7
 
         day_number = 1
         for row in range(1, 7):
@@ -365,7 +371,7 @@ class CalendarPopup(tk.Toplevel):
                     self.days_grid,
                     text=str(day_number),
                     width=4,
-                    state="disabled" if date_value < datetime.date.today() else "normal",
+                    state="disabled" if date_value < get_today() else "normal",
                     command=lambda value=date_value: self.select_date(value),
                 )
                 button.grid(row=row, column=col, padx=2, pady=2)
@@ -384,7 +390,7 @@ class TaskCalendarPopup(tk.Toplevel):
         self.geometry("850x650")
         self.transient(parent)
         self.tasks = tasks
-        today = datetime.date.today()
+        today = get_today()
         self.current_year = today.year
         self.current_month = today.month
 
@@ -799,7 +805,7 @@ class StudentPlannerApp(tk.Tk):
         self.schedule_plan_list = tk.Listbox(plan_frame, height=4, font=("Segoe UI", 10), bg="#ffffff")
         self.schedule_plan_list.pack(fill="x", pady=(6, 0))
 
-        today = datetime.date.today()
+        today = get_today()
         self.schedule_year = today.year
         self.schedule_month = today.month
         self.schedule_selected_date = today
@@ -821,7 +827,7 @@ class StudentPlannerApp(tk.Tk):
         self.refresh_schedule()
 
     def show_schedule_today(self):
-        today = datetime.date.today()
+        today = get_today()
         self.schedule_year = today.year
         self.schedule_month = today.month
         self.schedule_selected_date = today
