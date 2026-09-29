@@ -634,6 +634,7 @@ class StudentPlannerApp(tk.Tk):
         self.task_tree.tag_configure("overdue", background="#fdecea", foreground="#7a1d1d")
         self.task_tree.tag_configure("done", background="#edf3ff", foreground="#2f4154")
         self.task_tree.bind("<Button-1>", self.check_off_task)
+        self.task_tree.bind("<Double-1>", self.open_task_details)
         self.task_tree.pack(fill="both", expand=True)
 
         ttk.Label(right_panel, text="Reminders", style="Header.TLabel").pack(anchor="w", pady=(14, 10))
@@ -923,6 +924,48 @@ class StudentPlannerApp(tk.Tk):
         for key, button in self.category_buttons.items():
             button.configure(style="TButton" if key != category else "Accent.TButton")
         self.refresh_task_list()
+
+    def open_task_details(self, event):
+        task_id = self.task_tree.identify_row(event.y)
+        task_index = self.task_row_lookup.get(task_id)
+        if task_index is None:
+            return
+
+        task = self.tasks[task_index]
+        details_window = tk.Toplevel(self)
+        details_window.title(task.get("task_name", "Task Details"))
+        details_window.geometry("420x360")
+        details_window.minsize(360, 300)
+        details_window.configure(bg="#eef5ff")
+
+        content = ttk.Frame(details_window, padding=24)
+        content.pack(fill="both", expand=True)
+        ttk.Label(
+            content,
+            text=task.get("task_name", "Untitled task"),
+            style="Header.TLabel",
+            wraplength=360,
+        ).pack(anchor="w", pady=(0, 18))
+
+        status = task_due_status(task)
+        remaining_time = task_remaining_time(task)
+        details = (
+            ("Subject", task.get("task_subject", "Not set")),
+            ("Status", status.title()),
+            ("Due date", task.get("due_date", "Not set")),
+            ("Priority", f"{task.get('priority', 'Not set')} / 10"),
+            ("Estimated time", f"{task.get('estimated_time', 0)} minutes"),
+            ("Daily work target", f"{task.get('daily_work_target', 30)} minutes"),
+            ("Time logged", f"{task_time_spent(task)} minutes"),
+            ("Time remaining", f"{remaining_time} minutes"),
+        )
+        for label, value in details:
+            row = ttk.Frame(content)
+            row.pack(fill="x", pady=4)
+            ttk.Label(row, text=f"{label}:", style="Section.TLabel", width=19).pack(side="left", anchor="w")
+            ttk.Label(row, text=value, wraplength=210).pack(side="left", anchor="w")
+
+        ttk.Button(content, text="Close", command=details_window.destroy).pack(anchor="e", pady=(18, 0))
 
     def log_task_time(self):
         selected_items = self.task_tree.selection()
