@@ -14,9 +14,9 @@
     "task_subject": "Calculus",
     "estimated_time": 90,
     "daily_work_target": 60,
-    "time_spent": 0,
+    "time_spent": 90,
     "priority": 9,
     "due_date": "2026-09-28",
-    "status": "due"
+    "status": "done"
   }
 ]
