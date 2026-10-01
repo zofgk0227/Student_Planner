@@ -14,11 +14,8 @@ MONTHS = {
     "july": 7, "august": 8, "september": 9, "october": 10, "november": 11, "december": 12,
 }
 
-FIXED_TODAY = datetime.date(2026, 9, 26)
-
-
 def get_today():
-    return FIXED_TODAY
+    return datetime.date.today()
 
 
 def normalize_due_date(raw_due_date):
