@@ -3,10 +3,13 @@ import email
 import imaplib
 import json
 import argparse
+import smtplib
+import ssl
 from pathlib import Path
 import re
 import tkinter as tk
 from tkinter import ttk, messagebox
+from email.message import EmailMessage
 
 
 MONTHS = {
@@ -16,7 +19,6 @@ MONTHS = {
 
 def get_today():
     return datetime.date.today()
-
 
 def normalize_due_date(raw_due_date):
     if raw_due_date is None:
@@ -578,15 +580,26 @@ class StudentPlannerApp(tk.Tk):
         self.email_address_entry = ttk.Entry(left_panel, width=38)
         self.email_address_entry.pack(fill="x", pady=(0, 8))
 
+        ttk.Label(left_panel, text="SMTP server:", style="Section.TLabel").pack(anchor="w")
+        self.smtp_server_entry = ttk.Entry(left_panel, width=38)
+        self.smtp_server_entry.insert(0, "smtp.gmail.com")
+        self.smtp_server_entry.pack(fill="x", pady=(0, 8))
+
+        ttk.Label(left_panel, text="Send reminders to:", style="Section.TLabel").pack(anchor="w")
+        self.reminder_recipient_entry = ttk.Entry(left_panel, width=38)
+        self.reminder_recipient_entry.pack(fill="x", pady=(0, 8))
+
         ttk.Label(left_panel, text="Gmail app password:", style="Section.TLabel").pack(anchor="w")
         self.email_password_entry = ttk.Entry(left_panel, width=38, show="*")
         self.email_password_entry.pack(fill="x", pady=(0, 10))
         ttk.Button(left_panel, text="Check for Updates", command=self.check_email).pack(anchor="w")
         self.email_status = tk.StringVar(value="No email checked yet.")
         ttk.Label(left_panel, textvariable=self.email_status, wraplength=250).pack(anchor="w", pady=(8, 0))
+        self.reminder_email_status = tk.StringVar(value="Email reminders are not configured.")
+        ttk.Label(left_panel, textvariable=self.reminder_email_status, wraplength=250).pack(anchor="w", pady=(8, 0))
         ttk.Label(
             left_panel,
-            text="Gmail does not accept your normal password here. Create an app password in your Google Account first.",
+            text="Use your Gmail address and app password. Reminders are emailed once per task each day they appear.",
             wraplength=250,
         ).pack(anchor="w", pady=(8, 0))
 
@@ -1076,6 +1089,56 @@ class StudentPlannerApp(tk.Tk):
                 tk.END,
                 f"Due {day_label}: {task['task_name']} ({task['task_subject']}) - {task_remaining_time(task)} minutes remaining",
             )
+
+        self.send_reminder_email(reminders)
+
+    def send_reminder_email(self, reminders):
+        recipient = self.reminder_recipient_entry.get().strip()
+        if not recipient:
+            self.reminder_email_status.set("Email reminders are not configured.")
+            return
+
+        sender = self.email_address_entry.get().strip()
+        password = self.email_password_entry.get().strip()
+        server_name = self.smtp_server_entry.get().strip()
+        if not sender or not password or not server_name:
+            self.reminder_email_status.set("Enter your email address, app password, and SMTP server to send reminders.")
+            return
+
+        today = get_today().isoformat()
+        unsent_reminders = [
+            (days_until_due, task)
+            for days_until_due, task in reminders
+            if task.get("reminder_email_sent_date") != today
+        ]
+        if not unsent_reminders:
+            self.reminder_email_status.set("Today's due-work reminders have already been emailed.")
+            return
+
+        day_labels = {0: "today", 1: "tomorrow", 2: "in 2 days"}
+        body = "Your upcoming work reminders:\n\n" + "\n".join(
+            f"- {task['task_name']} ({task['task_subject']}), due {day_labels[days_until_due]} "
+            f"({task['due_date']}); {task_remaining_time(task)} minutes remaining"
+            for days_until_due, task in unsent_reminders
+        )
+        message = EmailMessage()
+        message["Subject"] = "Student Planner: upcoming work due"
+        message["From"] = sender
+        message["To"] = recipient
+        message.set_content(body)
+
+        try:
+            with smtplib.SMTP_SSL(server_name, 465, context=ssl.create_default_context(), timeout=15) as smtp:
+                smtp.login(sender, password)
+                smtp.send_message(message)
+        except (OSError, smtplib.SMTPException) as exc:
+            self.reminder_email_status.set(f"Reminder email failed: {exc}")
+            return
+
+        for _, task in unsent_reminders:
+            task["reminder_email_sent_date"] = today
+        self.save_tasks()
+        self.reminder_email_status.set(f"Emailed {len(unsent_reminders)} due-work reminder(s) to {recipient}.")
 
     def refresh_progress_bars(self):
         for widget in self.progress_frame.winfo_children():
