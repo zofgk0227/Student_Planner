@@ -71,6 +71,11 @@ def task_due_status(task, today=None):
     return "overdue" if due_date < today else "due"
 
 
+def task_due_label(task):
+    due_time = task.get("due_time")
+    return f"{task['due_date']} {due_time}" if due_time else task["due_date"]
+
+
 def create_action_plan(tasks):
     active_tasks = [task for task in tasks if task.get("status") != "done"]
     return sorted(
@@ -173,6 +178,7 @@ def create_daily_plan(tasks, day_minutes=None, today=None):
             "estimated_time": task["estimated_time"],
             "daily_work_target": task.get("daily_work_target", 30),
             "due_date": task["due_date"],
+            "due_time": task.get("due_time", ""),
             "planned_minutes": planned_minutes,
             "remaining_time": task_remaining_time(task),
             "score": task_plan["score"],
@@ -261,6 +267,12 @@ SCHOOL_EMAIL_KEYWORDS = (
     "reminder", "due", "grade", "class", "lesson", "school",
 )
 
+MONTH_NAMES = {
+    **MONTHS,
+    "jan": 1, "feb": 2, "mar": 3, "apr": 4, "jun": 6, "jul": 7,
+    "aug": 8, "sep": 9, "sept": 9, "oct": 10, "nov": 11, "dec": 12,
+}
+
 
 def decode_email_header(value):
     if not value:
@@ -289,6 +301,94 @@ def get_email_text(message):
 def is_school_update(subject, body):
     searchable_text = f"{subject} {body}".lower()
     return any(re.search(rf"\b{re.escape(keyword)}\b", searchable_text) for keyword in SCHOOL_EMAIL_KEYWORDS)
+
+
+def extract_email_date_time(text, today=None):
+    today = today or get_today()
+    date_candidates = []
+
+    for match in re.finditer(r"\b(20\d{2})-(\d{1,2})-(\d{1,2})\b", text):
+        year, month, day = map(int, match.groups())
+        try:
+            candidate = datetime.date(year, month, day)
+        except ValueError:
+            continue
+        date_candidates.append((match.start(), candidate))
+
+    for match in re.finditer(r"\b(\d{1,2})/(\d{1,2})(?:/(\d{2,4}))?\b", text):
+        month, day, year = match.groups()
+        year = int(year) if year else today.year
+        if year < 100:
+            year += 2000
+        try:
+            candidate = datetime.date(year, int(month), int(day))
+        except ValueError:
+            continue
+        date_candidates.append((match.start(), candidate))
+
+    month_pattern = "|".join(sorted(MONTH_NAMES, key=len, reverse=True))
+    month_date_pattern = rf"\b({month_pattern})\.?\s+(\d{{1,2}})(?:st|nd|rd|th)?(?:,?\s+(\d{{4}}))?\b"
+    for match in re.finditer(month_date_pattern, text, re.IGNORECASE):
+        month_name, day, year = match.groups()
+        try:
+            candidate = datetime.date(int(year) if year else today.year, MONTH_NAMES[month_name.lower()], int(day))
+        except ValueError:
+            continue
+        date_candidates.append((match.start(), candidate))
+
+    day_month_pattern = rf"\b(\d{{1,2}})(?:st|nd|rd|th)?\s+({month_pattern})\.?(?:,?\s+(\d{{4}}))?\b"
+    for match in re.finditer(day_month_pattern, text, re.IGNORECASE):
+        day, month_name, year = match.groups()
+        try:
+            candidate = datetime.date(int(year) if year else today.year, MONTH_NAMES[month_name.lower()], int(day))
+        except ValueError:
+            continue
+        date_candidates.append((match.start(), candidate))
+
+    for match in re.finditer(r"\b(today|tomorrow|day after tomorrow)\b", text, re.IGNORECASE):
+        days_ahead = {"today": 0, "tomorrow": 1, "day after tomorrow": 2}[match.group(1).lower()]
+        date_candidates.append((match.start(), today + datetime.timedelta(days=days_ahead)))
+
+    weekday_names = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
+    weekday_pattern = r"\b(?:(next)\s+)?(" + "|".join(weekday_names) + r")\b"
+    for match in re.finditer(weekday_pattern, text, re.IGNORECASE):
+        next_week = match.group(1) is not None
+        target_weekday = weekday_names.index(match.group(2).lower())
+        days_ahead = (target_weekday - today.weekday()) % 7
+        if next_week and days_ahead == 0:
+            days_ahead = 7
+        date_candidates.append((match.start(), today + datetime.timedelta(days=days_ahead)))
+
+    future_dates = [candidate for _, candidate in sorted(date_candidates) if candidate >= today]
+    due_date = future_dates[0].isoformat() if future_dates else None
+
+    time_match = re.search(
+        r"\b(noon|midnight)\b|"
+        r"\b(?:at\s*)((?:0?[1-9]|1[0-2]))(?::([0-5]\d))?\s*(a\.?m\.?|p\.?m\.?)\b|"
+        r"\b((?:0?[1-9]|1[0-2]))(?::([0-5]\d))?\s*(a\.?m\.?|p\.?m\.?)\b|"
+        r"\b(?:at\s+)?([01]?\d|2[0-3]):([0-5]\d)\b",
+        text,
+        re.IGNORECASE,
+    )
+    due_time = None
+    if time_match:
+        if time_match.group(1):
+            due_time = "12:00" if time_match.group(1).lower() == "noon" else "00:00"
+        elif time_match.group(2) or time_match.group(5):
+            hour_group = 2 if time_match.group(2) else 5
+            minute_group = 3 if time_match.group(2) else 6
+            meridiem_group = 4 if time_match.group(2) else 7
+            hour = int(time_match.group(hour_group))
+            minute = int(time_match.group(minute_group) or 0)
+            meridiem = time_match.group(meridiem_group).lower().replace(".", "")
+            hour %= 12
+            if meridiem == "pm":
+                hour += 12
+            due_time = f"{hour:02d}:{minute:02d}"
+        else:
+            due_time = f"{int(time_match.group(8)):02d}:{int(time_match.group(9)):02d}"
+
+    return due_date, due_time
 
 
 class CalendarPopup(tk.Toplevel):
@@ -491,6 +591,7 @@ class StudentPlannerApp(tk.Tk):
         self.notebook.add(self.schedule_tab, text="Schedule")
 
         page_canvas = tk.Canvas(overview_tab, highlightthickness=0, background="#eef5ff")
+        self.page_canvas = page_canvas
         page_scrollbar = ttk.Scrollbar(self, orient="vertical", command=page_canvas.yview)
         page_canvas.configure(yscrollcommand=page_scrollbar.set)
         page_scrollbar.pack(side="right", fill="y")
@@ -563,6 +664,10 @@ class StudentPlannerApp(tk.Tk):
         self.date_entry.pack(side="left", fill="x", expand=True)
         ttk.Button(date_frame, text="Pick Date", command=self.open_calendar).pack(side="left", padx=(8, 0))
 
+        ttk.Label(left_panel, text="Due time (optional, 24-hour HH:MM):", style="Section.TLabel").pack(anchor="w")
+        self.due_time_entry = ttk.Entry(left_panel, width=38)
+        self.due_time_entry.pack(fill="x", pady=(0, 10))
+
         button_row = ttk.Frame(left_panel)
         button_row.pack(fill="x", pady=(8, 0))
         ttk.Button(button_row, text="Add Task", command=self.add_task).pack(side="left", padx=(0, 10))
@@ -632,14 +737,14 @@ class StudentPlannerApp(tk.Tk):
         self.task_tree.heading("subject", text="Subject")
         self.task_tree.heading("time", text="Time")
         self.task_tree.heading("priority", text="Priority")
-        self.task_tree.heading("due_date", text="Due Date")
+        self.task_tree.heading("due_date", text="Due Date / Time")
         self.task_tree.column("check", width=34, anchor="center", stretch=False)
         self.task_tree.column("status", width=90, anchor="center")
         self.task_tree.column("name", width=180, anchor="center")
         self.task_tree.column("subject", width=140, anchor="center")
         self.task_tree.column("time", width=100, anchor="center")
         self.task_tree.column("priority", width=80, anchor="center")
-        self.task_tree.column("due_date", width=110, anchor="center")
+        self.task_tree.column("due_date", width=130, anchor="center")
         self.task_tree.tag_configure("due", background="#eaf7ea", foreground="#1d3557")
         self.task_tree.tag_configure("overdue", background="#fdecea", foreground="#7a1d1d")
         self.task_tree.tag_configure("done", background="#edf3ff", foreground="#2f4154")
@@ -733,6 +838,7 @@ class StudentPlannerApp(tk.Tk):
         self.daily_work_var.set("30")
         self.priority_var.set("5")
         self.due_date_var.set("")
+        self.due_time_entry.delete(0, tk.END)
 
     def add_task(self):
         task_name = self.task_name_entry.get().strip()
@@ -741,6 +847,7 @@ class StudentPlannerApp(tk.Tk):
         daily_work_target = self.daily_work_var.get().strip()
         priority = self.priority_var.get().strip()
         due_date = self.due_date_var.get().strip()
+        due_time = self.due_time_entry.get().strip()
 
         if not task_name or not subject:
             messagebox.showerror("Missing information", "Please enter both a task name and a subject.")
@@ -752,6 +859,9 @@ class StudentPlannerApp(tk.Tk):
 
         try:
             normalized_due_date = normalize_due_date(due_date)
+            if due_time and not re.fullmatch(r"(?:[01]\d|2[0-3]):[0-5]\d", due_time):
+                raise ValueError("Due time must use 24-hour HH:MM format, such as 15:30.")
+            normalized_due_time = due_time or None
             estimated_time_value = int(estimated_time)
             daily_work_target_value = int(daily_work_target)
             priority_value = int(priority)
@@ -776,6 +886,8 @@ class StudentPlannerApp(tk.Tk):
             "due_date": normalized_due_date,
             "status": "due",
         }
+        if normalized_due_time:
+            task["due_time"] = normalized_due_time
 
         self.tasks.append(task)
         self.save_tasks()
@@ -783,6 +895,31 @@ class StudentPlannerApp(tk.Tk):
         self.update_action_plan()
         self.refresh_schedule()
         self.clear_form()
+
+    def prepare_task_from_email(self, subject, due_date, due_time):
+        form_has_content = any((
+            self.task_name_entry.get().strip(),
+            self.subject_entry.get().strip(),
+            self.due_date_var.get().strip(),
+            self.due_time_entry.get().strip(),
+        ))
+        if form_has_content and not messagebox.askyesno(
+            "Replace current task details?",
+            "The task form already contains information. Replace it with the details from this email?",
+        ):
+            return False
+
+        self.clear_form()
+        self.task_name_entry.insert(0, subject if subject != "(No subject)" else "School update")
+        self.subject_entry.insert(0, "School")
+        if due_date:
+            self.due_date_var.set(due_date)
+        if due_time:
+            self.due_time_entry.insert(0, due_time)
+        self.notebook.select(0)
+        self.page_canvas.yview_moveto(0)
+        self.task_name_entry.focus_set()
+        return True
 
     def open_task_calendar(self):
         TaskCalendarPopup(self, self.tasks)
@@ -898,7 +1035,9 @@ class StudentPlannerApp(tk.Tk):
                 status_prefix = "Done: " if task.get("status") == "done" else "Task: "
                 tk.Label(
                     cell,
-                    text=f"{status_prefix}{task['task_name']}",
+                    text=f"{status_prefix}{task['task_name']} ({task.get('due_time')})"
+                    if task.get("due_time")
+                    else f"{status_prefix}{task['task_name']}",
                     bg="#d9edf7" if task.get("status") != "done" else "#e5e7eb",
                     fg="#16324f",
                     anchor="w",
@@ -926,7 +1065,7 @@ class StudentPlannerApp(tk.Tk):
             self.schedule_plan_list.insert(
                 tk.END,
                 f"{task_plan['task_name']} ({task_plan['task_subject']}) - "
-                f"{task_plan['planned_minutes']} min, due {task_plan['due_date']}",
+                f"{task_plan['planned_minutes']} min, due {task_due_label(task_plan)}",
             )
 
     def set_task_category(self, category):
@@ -962,7 +1101,7 @@ class StudentPlannerApp(tk.Tk):
         details = (
             ("Subject", task.get("task_subject", "Not set")),
             ("Status", status.title()),
-            ("Due date", task.get("due_date", "Not set")),
+            ("Due date/time", task_due_label(task)),
             ("Priority", f"{task.get('priority', 'Not set')} / 10"),
             ("Estimated time", f"{task.get('estimated_time', 0)} minutes"),
             ("Daily work target", f"{task.get('daily_work_target', 30)} minutes"),
@@ -1067,7 +1206,7 @@ class StudentPlannerApp(tk.Tk):
                     task["task_subject"],
                     f"{task_remaining_time(task)} min left" if task["status"] != "done" else "Completed",
                     task["priority"],
-                    task["due_date"],
+                    task_due_label(task),
                 ),
                 tags=(task["status"],),
             )
@@ -1118,7 +1257,7 @@ class StudentPlannerApp(tk.Tk):
         day_labels = {0: "today", 1: "tomorrow", 2: "in 2 days"}
         body = "Your upcoming work reminders:\n\n" + "\n".join(
             f"- {task['task_name']} ({task['task_subject']}), due {day_labels[days_until_due]} "
-            f"({task['due_date']}); {task_remaining_time(task)} minutes remaining"
+            f"({task_due_label(task)}); {task_remaining_time(task)} minutes remaining"
             for days_until_due, task in unsent_reminders
         )
         message = EmailMessage()
@@ -1180,7 +1319,7 @@ class StudentPlannerApp(tk.Tk):
                 tk.END,
                 f"{position}. {task_name} ({subject}) - {planned} min planned today, "
                 f"Priority {priority}/10, total {task_plan['estimated_time']} min, "
-                f"{remaining} min left, due {due_date}",
+                f"{remaining} min left, due {task_due_label(task_plan)}",
             )
 
     def check_email(self):
@@ -1199,6 +1338,7 @@ class StudentPlannerApp(tk.Tk):
             _, search_data = mailbox.uid("search", None, "ALL")
             message_ids = search_data[0].split()[-30:]
             updates = []
+            task_suggestions = []
 
             for message_id in reversed(message_ids):
                 _, message_data = mailbox.uid("fetch", message_id, "(BODY.PEEK[])")
@@ -1217,6 +1357,9 @@ class StudentPlannerApp(tk.Tk):
                     date = decode_email_header(message.get("Date"))
                     preview = " ".join(body.split())[:110]
                     updates.append((date, sender, subject, preview))
+                    due_date, due_time = extract_email_date_time(f"{subject} {body}")
+                    if due_date or due_time:
+                        task_suggestions.append((subject, due_date, due_time))
 
             mailbox.logout()
         except imaplib.IMAP4.error as exc:
@@ -1242,6 +1385,19 @@ class StudentPlannerApp(tk.Tk):
             self.email_tree.insert("", tk.END, values=update)
 
         self.email_status.set(f"Found {len(updates)} school update(s).")
+        for subject, due_date, due_time in task_suggestions:
+            found_details = []
+            if due_date:
+                found_details.append(f"date: {due_date}")
+            if due_time:
+                found_details.append(f"time: {due_time}")
+            if messagebox.askyesno(
+                "Create a task from this email?",
+                f'"{subject}" mentions {" and ".join(found_details)}.\n\n'
+                "Would you like to fill in the task form with these details? Review it and click Add Task to save.",
+            ):
+                self.prepare_task_from_email(subject, due_date, due_time)
+                break
 
 
 def parse_arguments():
