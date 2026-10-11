@@ -34,10 +34,32 @@
     "task_subject": "math",
     "estimated_time": 30,
     "daily_work_target": 30,
-    "time_spent": 0,
+    "time_spent": 30,
     "priority": 5,
     "due_date": "2026-10-03",
-    "status": "due",
+    "status": "done",
+    "reminder_email_sent_date": "2026-10-03"
+  },
+  {
+    "task_name": "test",
+    "task_subject": "math",
+    "estimated_time": 30,
+    "daily_work_target": 30,
+    "time_spent": 30,
+    "priority": 5,
+    "due_date": "2026-10-04",
+    "status": "done",
+    "reminder_email_sent_date": "2026-10-03"
+  },
+  {
+    "task_name": "test",
+    "task_subject": "science",
+    "estimated_time": 30,
+    "daily_work_target": 30,
+    "time_spent": 30,
+    "priority": 5,
+    "due_date": "2026-10-05",
+    "status": "done",
     "reminder_email_sent_date": "2026-10-03"
   },
   {
@@ -47,19 +69,27 @@
     "daily_work_target": 30,
     "time_spent": 0,
     "priority": 5,
-    "due_date": "2026-10-04",
-    "status": "due",
-    "reminder_email_sent_date": "2026-10-03"
+    "due_date": "2026-10-13",
+    "status": "due"
   },
   {
-    "task_name": "test",
+    "task_name": "quiz",
+    "task_subject": "math",
+    "estimated_time": 30,
+    "daily_work_target": 30,
+    "time_spent": 0,
+    "priority": 5,
+    "due_date": "2026-10-13",
+    "status": "due"
+  },
+  {
+    "task_name": "assignment",
     "task_subject": "science",
     "estimated_time": 30,
     "daily_work_target": 30,
     "time_spent": 0,
     "priority": 5,
-    "due_date": "2026-10-05",
-    "status": "due",
-    "reminder_email_sent_date": "2026-10-03"
+    "due_date": "2026-10-14",
+    "status": "due"
   }
 ]

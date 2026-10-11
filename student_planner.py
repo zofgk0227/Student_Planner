@@ -574,12 +574,14 @@ class StudentPlannerApp(tk.Tk):
 
         self.tasks_file = Path(__file__).with_name("student_planner_tasks.json")
         self.tasks = self.load_tasks()
+        self.editing_task = None
         self.protocol("WM_DELETE_WINDOW", self.close_app)
 
         self.style = ttk.Style(self)
         self.style.theme_use("clam")
         self.style.configure("Header.TLabel", font=("Segoe UI", 16, "bold"), foreground="#1d3557")
         self.style.configure("Section.TLabel", font=("Segoe UI", 11, "bold"), foreground="#264653")
+        self.style.configure("Accent.TButton", padding=(10, 6), foreground="#1d3557")
         self.style.configure("TEntry", padding=6)
         self.style.configure("TButton", padding=(10, 6))
 
@@ -611,23 +613,23 @@ class StudentPlannerApp(tk.Tk):
         left_panel = ttk.Frame(main_container, padding=12)
         left_panel.pack(side="left", fill="y", padx=(0, 18))
 
-        ttk.Label(left_panel, text="Add a task", style="Header.TLabel").pack(anchor="w", pady=(0, 12))
+        self.task_form_title = ttk.Label(left_panel, text="Add a task", style="Header.TLabel")
+        self.task_form_title.pack(anchor="w", pady=(0, 12))
 
         ttk.Label(left_panel, text="Task name:", style="Section.TLabel").pack(anchor="w")
         self.task_name_entry = ttk.Entry(left_panel, width=38)
         self.task_name_entry.pack(fill="x", pady=(0, 10))
+        self.task_name_entry.bind("<Return>", lambda event: self.subject_entry.focus_set())
 
         ttk.Label(left_panel, text="Subject:", style="Section.TLabel").pack(anchor="w")
         self.subject_entry = ttk.Entry(left_panel, width=38)
         self.subject_entry.pack(fill="x", pady=(0, 10))
+        self.subject_entry.bind("<Return>", lambda event: self.date_picker_button.focus_set())
 
-        ttk.Label(left_panel, text="Estimated time (minutes):", style="Section.TLabel").pack(anchor="w")
         time_values = ["15", "30", "45", "60", "90", "120", "180", "240"]
         self.time_var = tk.StringVar(value=time_values[1])
         self.time_dropdown = ttk.Combobox(left_panel, textvariable=self.time_var, values=time_values, state="readonly", width=35)
-        self.time_dropdown.pack(fill="x", pady=(0, 10))
 
-        ttk.Label(left_panel, text="Daily work target (minutes):", style="Section.TLabel").pack(anchor="w")
         self.daily_work_var = tk.StringVar(value=time_values[1])
         self.daily_work_dropdown = ttk.Combobox(
             left_panel,
@@ -636,25 +638,12 @@ class StudentPlannerApp(tk.Tk):
             state="readonly",
             width=35,
         )
-        self.daily_work_dropdown.pack(fill="x", pady=(0, 10))
 
-        ttk.Label(left_panel, text="Priority (1-10):", style="Section.TLabel").pack(anchor="w")
         priority_values = [str(value) for value in range(1, 11)]
         self.priority_var = tk.StringVar(value="5")
         self.priority_dropdown = ttk.Combobox(left_panel, textvariable=self.priority_var, values=priority_values, state="readonly", width=35)
-        self.priority_dropdown.pack(fill="x", pady=(0, 10))
 
-        ttk.Label(left_panel, text="Daily study budget (minutes):", style="Section.TLabel").pack(anchor="w")
-        daily_budget_values = ["30", "45", "60", "90", "120", "150", "180", "240", "300"]
         self.daily_budget_var = tk.StringVar(value="120")
-        self.daily_budget_dropdown = ttk.Combobox(
-            left_panel,
-            textvariable=self.daily_budget_var,
-            values=daily_budget_values,
-            state="readonly",
-            width=35,
-        )
-        self.daily_budget_dropdown.pack(fill="x", pady=(0, 10))
 
         ttk.Label(left_panel, text="Due date:", style="Section.TLabel").pack(anchor="w")
         date_frame = ttk.Frame(left_panel)
@@ -662,16 +651,36 @@ class StudentPlannerApp(tk.Tk):
         self.due_date_var = tk.StringVar()
         self.date_entry = ttk.Entry(date_frame, textvariable=self.due_date_var, width=28, state="readonly")
         self.date_entry.pack(side="left", fill="x", expand=True)
-        ttk.Button(date_frame, text="Pick Date", command=self.open_calendar).pack(side="left", padx=(8, 0))
+        self.date_picker_button = ttk.Button(date_frame, text="Pick Date", command=self.open_calendar)
+        self.date_picker_button.pack(side="left", padx=(8, 0))
 
         ttk.Label(left_panel, text="Due time (optional, 24-hour HH:MM):", style="Section.TLabel").pack(anchor="w")
         self.due_time_entry = ttk.Entry(left_panel, width=38)
         self.due_time_entry.pack(fill="x", pady=(0, 10))
+        self.due_time_entry.bind("<Return>", lambda event: self.add_task())
+
+        self.planning_options_visible = False
+        self.planning_options_button = ttk.Button(
+            left_panel,
+            text="Show planning options",
+            command=self.toggle_planning_options,
+        )
+        self.planning_options_button.pack(anchor="w", pady=(0, 6))
+        self.planning_options_frame = ttk.LabelFrame(left_panel, text="Optional planning details", padding=8)
+        for label, dropdown in (
+            ("Estimated time (minutes):", self.time_dropdown),
+            ("Daily work target (minutes):", self.daily_work_dropdown),
+            ("Priority (1-10):", self.priority_dropdown),
+        ):
+            ttk.Label(self.planning_options_frame, text=label).pack(anchor="w")
+            dropdown.pack(fill="x", pady=(0, 8))
 
         button_row = ttk.Frame(left_panel)
         button_row.pack(fill="x", pady=(8, 0))
-        ttk.Button(button_row, text="Add Task", command=self.add_task).pack(side="left", padx=(0, 10))
-        ttk.Button(button_row, text="Clear", command=self.clear_form).pack(side="left")
+        self.add_task_button = ttk.Button(button_row, text="Add Task", command=self.add_task)
+        self.add_task_button.pack(side="left", padx=(0, 10))
+        self.clear_form_button = ttk.Button(button_row, text="Clear", command=self.clear_form)
+        self.clear_form_button.pack(side="left")
         ttk.Button(left_panel, text="View Task Calendar", command=self.open_task_calendar).pack(anchor="w", pady=(10, 0))
 
         ttk.Separator(left_panel, orient="horizontal").pack(fill="x", pady=18)
@@ -713,13 +722,24 @@ class StudentPlannerApp(tk.Tk):
 
         ttk.Label(right_panel, text="Added Tasks", style="Header.TLabel").pack(anchor="w", pady=(0, 10))
         self.current_task_category = "due"
+        self.task_search_var = tk.StringVar()
+        search_frame = ttk.Frame(right_panel)
+        search_frame.pack(fill="x", pady=(0, 8))
+        ttk.Label(search_frame, text="Search tasks:").pack(side="left", padx=(0, 8))
+        self.task_search_entry = ttk.Entry(search_frame, textvariable=self.task_search_var)
+        self.task_search_entry.pack(side="left", fill="x", expand=True)
+        self.task_search_entry.bind("<Escape>", lambda event: self.task_search_var.set(""))
+        self.task_search_var.trace_add("write", self.on_task_search_changed)
+        self.bind("<Control-f>", lambda event: self.task_search_entry.focus_set())
+
         self.category_frame = ttk.Frame(right_panel)
         self.category_frame.pack(fill="x", pady=(0, 10))
         self.category_buttons = {}
+        self.category_labels = {"due": "Due", "overdue": "Overdue", "done": "Done"}
         for category_key, category_label in (("due", "Due"), ("overdue", "Overdue"), ("done", "Done")):
             button = ttk.Button(
                 self.category_frame,
-                text=category_label,
+                text=f"{category_label} (0)",
                 command=lambda key=category_key: self.set_task_category(key),
             )
             button.pack(side="left", padx=(0, 8))
@@ -750,7 +770,21 @@ class StudentPlannerApp(tk.Tk):
         self.task_tree.tag_configure("done", background="#edf3ff", foreground="#2f4154")
         self.task_tree.bind("<Button-1>", self.check_off_task)
         self.task_tree.bind("<Double-1>", self.open_task_details)
+        self.task_tree.bind("<<TreeviewSelect>>", self.update_task_action_buttons)
+        self.task_tree.bind("<Delete>", lambda event: self.delete_selected_task())
         self.task_tree.pack(fill="both", expand=True)
+        task_action_row = ttk.Frame(right_panel)
+        task_action_row.pack(fill="x", pady=(8, 0))
+        self.edit_task_button = ttk.Button(
+            task_action_row, text="Edit selected", command=self.edit_selected_task, state="disabled"
+        )
+        self.edit_task_button.pack(side="left", padx=(0, 8))
+        self.delete_task_button = ttk.Button(
+            task_action_row, text="Delete selected", command=self.delete_selected_task, state="disabled"
+        )
+        self.delete_task_button.pack(side="left")
+        self.task_list_message = tk.StringVar()
+        ttk.Label(right_panel, textvariable=self.task_list_message).pack(anchor="w", pady=(4, 0))
 
         ttk.Label(right_panel, text="Reminders", style="Header.TLabel").pack(anchor="w", pady=(14, 10))
         self.reminders_list = tk.Listbox(right_panel, height=4, font=("Segoe UI", 10), bg="#fff8e1")
@@ -832,6 +866,10 @@ class StudentPlannerApp(tk.Tk):
         self.due_date_var.set(selected_date.strftime("%Y-%m-%d"))
 
     def clear_form(self):
+        self.editing_task = None
+        self.task_form_title.configure(text="Add a task")
+        self.add_task_button.configure(text="Add Task")
+        self.clear_form_button.configure(text="Clear")
         self.task_name_entry.delete(0, tk.END)
         self.subject_entry.delete(0, tk.END)
         self.time_var.set("30")
@@ -839,6 +877,19 @@ class StudentPlannerApp(tk.Tk):
         self.priority_var.set("5")
         self.due_date_var.set("")
         self.due_time_entry.delete(0, tk.END)
+        self.task_name_entry.focus_set()
+
+    def toggle_planning_options(self):
+        self.planning_options_visible = not self.planning_options_visible
+        if self.planning_options_visible:
+            self.planning_options_frame.pack(fill="x", pady=(0, 6))
+            self.planning_options_button.configure(text="Hide planning options")
+        else:
+            self.planning_options_frame.pack_forget()
+            self.planning_options_button.configure(text="Show planning options")
+
+    def on_task_search_changed(self, *_):
+        self.refresh_task_list(refresh_reminders=False)
 
     def add_task(self):
         task_name = self.task_name_entry.get().strip()
@@ -858,7 +909,10 @@ class StudentPlannerApp(tk.Tk):
             return
 
         try:
-            normalized_due_date = normalize_due_date(due_date)
+            if self.editing_task is not None and due_date == self.editing_task.get("due_date"):
+                normalized_due_date = datetime.date.fromisoformat(due_date).isoformat()
+            else:
+                normalized_due_date = normalize_due_date(due_date)
             if due_time and not re.fullmatch(r"(?:[01]\d|2[0-3]):[0-5]\d", due_time):
                 raise ValueError("Due time must use 24-hour HH:MM format, such as 15:30.")
             normalized_due_time = due_time or None
@@ -889,7 +943,30 @@ class StudentPlannerApp(tk.Tk):
         if normalized_due_time:
             task["due_time"] = normalized_due_time
 
-        self.tasks.append(task)
+        if self.editing_task is not None:
+            task_index = next(
+                (index for index, saved_task in enumerate(self.tasks) if saved_task is self.editing_task),
+                None,
+            )
+            if task_index is None:
+                messagebox.showerror("Task not found", "That task is no longer available to edit.")
+                self.clear_form()
+                return
+            updated_task = self.tasks[task_index]
+            previous_time_spent = task_time_spent(updated_task)
+            previous_status = updated_task.get("status")
+            previous_reminder_date = updated_task.get("reminder_email_sent_date")
+            updated_task.update(task)
+            updated_task["time_spent"] = previous_time_spent
+            if previous_status == "done":
+                updated_task["status"] = "done"
+            if not normalized_due_time:
+                updated_task.pop("due_time", None)
+            if previous_reminder_date is not None:
+                updated_task["reminder_email_sent_date"] = previous_reminder_date
+        else:
+            self.tasks.append(task)
+
         self.save_tasks()
         self.refresh_task_list()
         self.update_action_plan()
@@ -957,6 +1034,22 @@ class StudentPlannerApp(tk.Tk):
         self.schedule_year = today.year
         self.schedule_month = today.month
         self.schedule_selected_date = today
+
+        budget_frame = ttk.Frame(plan_frame)
+        budget_frame.pack(anchor="e")
+        ttk.Label(budget_frame, text="Daily study budget:").pack(side="left", padx=(0, 8))
+        self.daily_budget_dropdown = ttk.Combobox(
+            budget_frame,
+            textvariable=self.daily_budget_var,
+            values=["30", "45", "60", "90", "120", "150", "180", "240", "300"],
+            state="readonly",
+            width=8,
+        )
+        self.daily_budget_dropdown.pack(side="left")
+        self.daily_budget_dropdown.bind(
+            "<<ComboboxSelected>>",
+            lambda event: (self.update_action_plan(), self.refresh_selected_schedule_plan()),
+        )
 
     def previous_schedule_month(self):
         if self.schedule_month == 1:
@@ -1074,6 +1167,65 @@ class StudentPlannerApp(tk.Tk):
             button.configure(style="TButton" if key != category else "Accent.TButton")
         self.refresh_task_list()
 
+    def selected_task_index(self):
+        selected_items = self.task_tree.selection()
+        if not selected_items:
+            return None
+        return self.task_row_lookup.get(selected_items[0])
+
+    def update_task_action_buttons(self, event=None):
+        state = "normal" if self.selected_task_index() is not None else "disabled"
+        self.edit_task_button.configure(state=state)
+        self.delete_task_button.configure(state=state)
+
+    def edit_selected_task(self):
+        task_index = self.selected_task_index()
+        if task_index is None:
+            messagebox.showerror("No task selected", "Select a task before editing.")
+            return
+
+        task = self.tasks[task_index]
+        self.editing_task = task
+        self.task_form_title.configure(text="Edit task")
+        self.add_task_button.configure(text="Save Changes")
+        self.clear_form_button.configure(text="Cancel")
+        self.task_name_entry.delete(0, tk.END)
+        self.task_name_entry.insert(0, task.get("task_name", ""))
+        self.subject_entry.delete(0, tk.END)
+        self.subject_entry.insert(0, task.get("task_subject", ""))
+        self.time_var.set(str(task.get("estimated_time", 30)))
+        self.daily_work_var.set(str(task.get("daily_work_target", 30)))
+        self.priority_var.set(str(task.get("priority", 5)))
+        self.due_date_var.set(task.get("due_date", ""))
+        self.due_time_entry.delete(0, tk.END)
+        self.due_time_entry.insert(0, task.get("due_time", ""))
+        if self.planning_options_visible is False:
+            self.toggle_planning_options()
+        self.notebook.select(0)
+        self.page_canvas.yview_moveto(0)
+        self.task_name_entry.focus_set()
+
+    def delete_selected_task(self):
+        task_index = self.selected_task_index()
+        if task_index is None:
+            messagebox.showerror("No task selected", "Select a task before deleting.")
+            return
+
+        task = self.tasks[task_index]
+        if not messagebox.askyesno(
+            "Delete task?",
+            f'Delete "{task.get("task_name", "Untitled task")}"? This cannot be undone.',
+        ):
+            return
+
+        if task is self.editing_task:
+            self.clear_form()
+        del self.tasks[task_index]
+        self.save_tasks()
+        self.refresh_task_list()
+        self.update_action_plan()
+        self.refresh_schedule()
+
     def open_task_details(self, event):
         task_id = self.task_tree.identify_row(event.y)
         task_index = self.task_row_lookup.get(task_id)
@@ -1174,7 +1326,7 @@ class StudentPlannerApp(tk.Tk):
         self.refresh_task_list()
         self.update_action_plan()
 
-    def refresh_task_list(self):
+    def refresh_task_list(self, refresh_reminders=True):
         for item in self.task_tree.get_children():
             self.task_tree.delete(item)
 
@@ -1182,16 +1334,38 @@ class StudentPlannerApp(tk.Tk):
         for task in self.tasks:
             task["status"] = task_due_status(task)
 
-        visible_tasks = [
-            task for task in self.tasks if task["status"] == self.current_task_category
-        ]
-        visible_tasks.sort(key=lambda task: (task["due_date"], -task["priority"], task["task_name"]))
-
-        self.task_tree.heading("status", text=self.current_task_category.title())
+        counts = {category: 0 for category in self.category_labels}
+        visible_tasks = []
+        query = self.task_search_var.get().strip().casefold()
         for task_index, task in enumerate(self.tasks):
+            counts[task["status"]] = counts.get(task["status"], 0) + 1
             if task["status"] != self.current_task_category:
                 continue
+            searchable_text = " ".join(
+                (
+                    task.get("task_name", ""),
+                    task.get("task_subject", ""),
+                    task.get("due_date", ""),
+                    task.get("due_time", ""),
+                )
+            ).casefold()
+            if query and query not in searchable_text:
+                continue
+            visible_tasks.append((task_index, task))
+        visible_tasks.sort(
+            key=lambda item: (item[1]["due_date"], -item[1]["priority"], item[1]["task_name"].casefold())
+        )
 
+        for category, button in self.category_buttons.items():
+            button.configure(text=f"{self.category_labels[category]} ({counts[category]})")
+        self.task_list_message.set(
+            "No tasks match your search." if query and not visible_tasks
+            else f"No {self.category_labels[self.current_task_category].lower()} tasks yet."
+            if not visible_tasks
+            else ""
+        )
+        self.task_tree.heading("status", text="Status")
+        for task_index, task in visible_tasks:
             row_id = f"task_{task_index}"
             self.task_row_lookup[row_id] = task_index
             status_label = {"due": "Due", "overdue": "Overdue", "done": "Done"}[task["status"]]
@@ -1212,7 +1386,9 @@ class StudentPlannerApp(tk.Tk):
             )
             self.task_tree.item(row_id, tags=(task["status"],))
         self.refresh_progress_bars()
-        self.refresh_reminders()
+        self.update_task_action_buttons()
+        if refresh_reminders:
+            self.refresh_reminders()
 
     def refresh_reminders(self):
         self.reminders_list.delete(0, tk.END)
